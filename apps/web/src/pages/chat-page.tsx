@@ -5,6 +5,7 @@ import { Composer } from "@/components/composer";
 import { Sidebar } from "@/components/sidebar";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { AgentMenu } from "@/components/agent-menu";
+import { EffortMenu } from "@/components/effort-menu";
 import { ActivityDrawer } from "@/components/activity-drawer";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,7 @@ import * as api from "@/lib/api";
 import { useTheme } from "@/hooks/use-theme";
 import { useI18n, type Locale } from "@/i18n";
 import { Logo } from "@/components/logo";
-import { Activity, Moon, Sun, MonitorSmartphone, Languages } from "lucide-react";
+import { Activity, Moon, Sun, MonitorSmartphone, Languages, Brain } from "lucide-react";
 import type { AgentProfile } from "@yudu/shared";
 
 export function ChatPage() {
@@ -111,7 +112,18 @@ export function ChatPage() {
                 </div>
                 <div className="hidden h-4 w-px bg-border sm:block" />
                 <AgentMenu />
+                <EffortMenu />
                 <div className="hidden h-4 w-px bg-border sm:block" />
+                <Button
+                  variant={active.showThinking ? "secondary" : "ghost"}
+                  size="icon"
+                  className="h-8 w-8"
+                  aria-label={t("reasoning.toggle")}
+                  title={t("reasoning.toggle")}
+                  onClick={() => void updateConv(active.id, { showThinking: !active.showThinking })}
+                >
+                  <Brain className="h-4 w-4" />
+                </Button>
                 <div className="hidden items-center gap-2 sm:flex">
                   <Select
                     value={active.provider}

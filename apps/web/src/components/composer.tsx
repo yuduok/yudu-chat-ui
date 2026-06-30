@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Send, Square, Wand2 } from "lucide-react";
+import { Brain, Send, Square, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
@@ -12,6 +12,11 @@ export function Composer() {
   const send = useChat((s) => s.sendMessage);
   const stop = useChat((s) => s.stop);
   const streaming = useChat((s) => s.streaming);
+  const updateConv = useChat((s) => s.updateConversationSettings);
+  const conversations = useChat((s) => s.conversations);
+  const activeId = useChat((s) => s.activeId);
+  const active = conversations.find((c) => c.id === activeId);
+  const showThinking = active?.showThinking !== false;
 
   const [value, setValue] = useState("");
   const [useTools, setUseTools] = useState(false);
@@ -29,7 +34,17 @@ export function Composer() {
     const text = value.trim();
     if (!text || streaming) return;
     setValue("");
-    void send(text, { useTools });
+    void send(text, {
+      useTools,
+      reasoningEffort: (active?.reasoningEffort as
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | null
+        | undefined) ?? undefined,
+      showThinking: active?.showThinking ?? true,
+    });
   }
 
   return (
@@ -50,21 +65,41 @@ export function Composer() {
             className="min-h-[44px] resize-none"
             rows={1}
           />
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-            <Switch
-              id="composer-use-tools"
-              checked={useTools}
-              onCheckedChange={setUseTools}
-              disabled={streaming}
-              aria-label={t("composer.runWithTools")}
-            />
-            <Label
-              htmlFor="composer-use-tools"
-              className="flex cursor-pointer items-center gap-1 select-none"
-            >
-              <Wand2 className="h-3 w-3" />
-              {t("composer.runWithTools")}
-            </Label>
+          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="composer-use-tools"
+                checked={useTools}
+                onCheckedChange={setUseTools}
+                disabled={streaming}
+                aria-label={t("composer.runWithTools")}
+              />
+              <Label
+                htmlFor="composer-use-tools"
+                className="flex cursor-pointer items-center gap-1 select-none"
+              >
+                <Wand2 className="h-3 w-3" />
+                {t("composer.runWithTools")}
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="composer-show-thinking"
+                checked={showThinking}
+                onCheckedChange={(v) => {
+                  if (activeId) void updateConv(activeId, { showThinking: v });
+                }}
+                disabled={!activeId}
+                aria-label={t("reasoning.showThinking")}
+              />
+              <Label
+                htmlFor="composer-show-thinking"
+                className="flex cursor-pointer items-center gap-1 select-none"
+              >
+                <Brain className="h-3 w-3" />
+                {t("reasoning.showThinking")}
+              </Label>
+            </div>
           </div>
         </div>
         {streaming ? (

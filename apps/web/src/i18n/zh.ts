@@ -43,7 +43,18 @@ export const zh: Record<TranslationKey, string> = {
   "agent.empty": "运行时，工具调用与智能体事件会出现在这里。",
   "chat.agentAttribution": "由 {agent} 生成",
 
-  // Models picker (fetch result)
+  // Reasoning
+  "reasoning.menu": "推理深度",
+  "reasoning.effort.low": "低",
+  "reasoning.effort.medium": "中",
+  "reasoning.effort.high": "高",
+  "reasoning.effort.xhigh": "极高",
+  "reasoning.effort.none": "默认",
+  "reasoning.showThinking": "显示思维链",
+  "reasoning.thinking": "思考",
+  "reasoning.toggle": "展开/收起思考过程",
+
+    // Models picker (fetch result)
   "settings.fetchedModels": "已获取的模型",
   "settings.fetchedModelsAdd": "添加（{count}）",
   "settings.fetchedModelsAlready": "已添加",

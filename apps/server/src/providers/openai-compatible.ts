@@ -51,6 +51,13 @@ export class OpenAICompatibleProvider implements ChatProvider {
       stream: true,
       stream_options: { include_usage: true },
     };
+    // Reasoning effort: forward as-is. Upstream either honors it
+    // (o*-mini, gpt-5 family, deepseek-reasoner, etc.) or ignores the
+    // unknown field. We don't auto-promote a missing value because some
+    // providers reject unknown fields outright — let the caller decide.
+    if (input.reasoningEffort) {
+      body.reasoning_effort = input.reasoningEffort;
+    }
     if (input.tools && input.tools.length) {
       body.tools = input.tools.map((t) => ({
         type: "function",
@@ -118,6 +125,21 @@ export class OpenAICompatibleProvider implements ChatProvider {
               const delta = choice?.delta?.content;
               if (typeof delta === "string" && delta.length) {
                 yield { delta };
+              }
+              // Reasoning deltas: the field name varies by upstream.
+              //   - DeepSeek -> delta.reasoning_content
+              //   - OpenAI o*-mini / gpt-5 -> delta.reasoning
+              // Accept any of them and forward verbatim.
+              const r =
+                choice?.delta?.reasoning_content ??
+                choice?.delta?.reasoning ??
+                (Array.isArray(choice?.delta?.reasoning_details)
+                  ? (choice.delta.reasoning_details as { text?: string }[])
+                      .map((d) => d?.text ?? "")
+                      .join("")
+                  : "");
+              if (typeof r === "string" && r.length) {
+                yield { reasoningDelta: r };
               }
               const toolDeltas = choice?.delta?.tool_calls;
               if (Array.isArray(toolDeltas)) {

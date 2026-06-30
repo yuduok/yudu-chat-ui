@@ -18,6 +18,8 @@ function rowToConversation(row: typeof conversations.$inferSelect): Conversation
     systemPrompt: row.systemPrompt,
     temperature: row.temperature,
     agentId: row.agentId ?? null,
+    reasoningEffort: (row.reasoningEffort as Conversation["reasoningEffort"]) ?? null,
+    showThinking: row.showThinking ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -68,6 +70,8 @@ export async function conversationRoutes(app: FastifyInstance) {
       systemPrompt?: string;
       temperature?: number;
       agentId?: string | null;
+      reasoningEffort?: "low" | "medium" | "high" | "xhigh" | null;
+      showThinking?: boolean | null;
     };
   }>("/api/conversations", async (req) => {
     const id = nanoid();
@@ -81,6 +85,8 @@ export async function conversationRoutes(app: FastifyInstance) {
       systemPrompt: body.systemPrompt ?? null,
       temperature: body.temperature ?? 0.7,
       agentId: body.agentId ?? null,
+      reasoningEffort: body.reasoningEffort ?? null,
+      showThinking: body.showThinking ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -121,6 +127,8 @@ export async function conversationRoutes(app: FastifyInstance) {
       systemPrompt: string | null;
       temperature: number | null;
       agentId: string | null;
+      reasoningEffort: "low" | "medium" | "high" | "xhigh" | null;
+      showThinking: boolean | null;
     }>;
   }>("/api/conversations/:id", async (req, reply) => {
     const id = req.params.id;
@@ -132,6 +140,13 @@ export async function conversationRoutes(app: FastifyInstance) {
     if (b.systemPrompt !== undefined) patch.systemPrompt = b.systemPrompt;
     if (b.temperature !== undefined) patch.temperature = b.temperature;
     if (b.agentId !== undefined) patch.agentId = b.agentId;
+    if (b.reasoningEffort !== undefined) {
+      patch.reasoningEffort =
+        b.reasoningEffort === null ? null : String(b.reasoningEffort);
+    }
+    if (b.showThinking !== undefined) {
+      patch.showThinking = b.showThinking === null ? null : Boolean(b.showThinking);
+    }
     await db.update(conversations).set(patch).where(eq(conversations.id, id));
     const [conv] = await db.select().from(conversations).where(eq(conversations.id, id));
     if (!conv) return reply.code(404).send({ error: "Not found" });

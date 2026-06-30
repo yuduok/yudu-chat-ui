@@ -1,13 +1,18 @@
 import type { ChatProvider, ProviderChatInput, ProviderChatChunk } from "./types.js";
 
 // Deterministic mock provider used for local development without API keys.
-// Two behaviours:
 //   - default: echoes the user's last message in tokens so the SSE/UI flow
 //     can be tested without burning API credits.
 //   - useTools=true: if the latest user message contains "weather", it
-//     emits a single fake tool_call for `get_weather` then exits. The server
-//     picks the tool up, runs it, and feeds the result back in. We respond
-//     with a short summary once we see a tool result for that call.
+//     emits a single fake tool_call for `get_weather` then exits. The
+//     server picks the tool up, runs it, and feeds the result back in.
+//     We respond with a short summary once we see a tool result for
+//     that call.
+//
+// We always emit a synthetic reasoning trace first so the UI's
+// thinking-toggle path is exercised without a real API key. The trace
+// length scales with `input.reasoningEffort` so the four depth settings
+// are visibly distinguishable.
 export class MockProvider implements ChatProvider {
   id = "mock";
   label = "Mock (offline)";
@@ -19,14 +24,28 @@ export class MockProvider implements ChatProvider {
     const last = [...input.messages].reverse().find((m) => m.role === "user");
     const text = last?.content?.trim() || "Hello!";
 
-    // If a previous tool_result exists in the conversation, generate a
-    // short final answer based on its content rather than another tool call.
+    // Always emit the reasoning trace first so it lands on every branch.
+    const effort = input.reasoningEffort ?? "low";
+    const trace =
+      effort === "xhigh"
+        ? `[xhigh] Mock reasoning: weighing the user's intent, recalling relevant context, drafting multiple candidate replies, sanity-checking tone, picking the most useful one.\n\n`
+        : effort === "high"
+        ? `[high] Mock reasoning: parsed the request, listed constraints, considered trade-offs.\n\n`
+        : effort === "medium"
+        ? `[medium] Mock reasoning: noted the request and a couple of angles.\n\n`
+        : `[low] Mock reasoning: thinking about it.\n\n`;
+    for (const ch of trace) {
+      if (input.signal?.aborted) return;
+      yield { reasoningDelta: ch };
+      await new Promise((r) => setTimeout(r, 4));
+    }
+
+    // If a previous tool_result exists, answer with a short summary.
     const toolResult = [...input.messages]
       .reverse()
       .find((m) => m.role === "tool") as typeof input.messages[number] | undefined;
     const toolResultStr =
-      toolResult?.parts?.find((p) => p.type === "tool_result")?.content ??
-      "";
+      toolResult?.parts?.find((p) => p.type === "tool_result")?.content ?? "";
 
     if (toolResultStr) {
       const summary = `Mock summary: ${toolResultStr}`;
@@ -42,8 +61,7 @@ export class MockProvider implements ChatProvider {
       return;
     }
 
-    // If tools are enabled and the user mentioned "weather", emit a fake
-    // tool_call and exit so the server runs it.
+    // Tool branch: emit a fake tool_call for the weather demo and exit.
     if (input.tools && input.tools.length && /weather/i.test(text)) {
       const toolName = input.tools.find((t) => t.name === "get_weather")
         ? "get_weather"
@@ -59,6 +77,7 @@ export class MockProvider implements ChatProvider {
       return;
     }
 
+    // Plain text fallback.
     const reply = `You said: "${text}". I'm a mock provider — set an API key in Settings to use a real model.`;
     for (const ch of reply) {
       if (input.signal?.aborted) return;

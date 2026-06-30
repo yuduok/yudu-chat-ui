@@ -83,7 +83,18 @@ export const en = {
   "chat.empty.cta": "New chat",
   "chat.theme.toggle": "Theme",
   "chat.appName": "Yudu Chat",
-  // Models picker (fetch result)
+  // Reasoning (depth + visible thinking trace)
+  "reasoning.menu": "Reasoning",
+  "reasoning.effort.low": "Low",
+  "reasoning.effort.medium": "Medium",
+  "reasoning.effort.high": "High",
+  "reasoning.effort.xhigh": "X-High",
+  "reasoning.effort.none": "Default",
+  "reasoning.showThinking": "Show thinking",
+  "reasoning.thinking": "Thinking",
+  "reasoning.toggle": "Toggle reasoning trace",
+
+    // Models picker (fetch result)
   "settings.fetchedModels": "Fetched models",
   "settings.fetchedModelsAdd": "Add ({count})",
   "settings.fetchedModelsAlready": "Added",

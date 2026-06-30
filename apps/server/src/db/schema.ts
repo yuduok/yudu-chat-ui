@@ -10,6 +10,13 @@ export const conversations = sqliteTable("conversations", {
   // Optional: when set, the server resolves the agent profile on every turn
   // and applies its systemPrompt / tool allowlist / temperature overrides.
   agentId: text("agent_id"),
+  // Optional: reasoning depth hint forwarded to the provider. Persisted
+  // per conversation so the choice survives a page reload.
+  reasoningEffort: text("reasoning_effort"),
+  // Whether the UI should render the reasoning trace. The server still
+  // collects & persists reasoning deltas when this is false so the data
+  // is recoverable from the DB even if the toggle is off.
+  showThinking: integer("show_thinking", { mode: "boolean" }),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });

@@ -23,6 +23,8 @@ export async function createConversation(input: {
   systemPrompt?: string;
   temperature?: number;
   agentId?: string | null;
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | null;
+  showThinking?: boolean | null;
 }): Promise<Conversation> {
   const r = await fetch(`${BASE}/conversations`, {
     method: "POST",
@@ -42,7 +44,17 @@ export async function getConversation(id: string): Promise<ConversationWithMessa
 export async function updateConversation(
   id: string,
   patch: Partial<
-    Pick<Conversation, "title" | "provider" | "model" | "systemPrompt" | "temperature" | "agentId">
+    Pick<
+      Conversation,
+      | "title"
+      | "provider"
+      | "model"
+      | "systemPrompt"
+      | "temperature"
+      | "agentId"
+      | "reasoningEffort"
+      | "showThinking"
+    >
   >,
 ): Promise<Conversation> {
   const r = await fetch(`${BASE}/conversations/${id}`, {

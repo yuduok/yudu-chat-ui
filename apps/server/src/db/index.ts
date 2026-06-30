@@ -56,3 +56,7 @@ sqlite.exec(`
 // v3 columns
 safeAlter("ALTER TABLE conversations ADD COLUMN agent_id TEXT");
 safeAlter("ALTER TABLE messages ADD COLUMN tool_call_ids TEXT");
+
+// v4 columns: per-conversation reasoning controls
+safeAlter("ALTER TABLE conversations ADD COLUMN reasoning_effort TEXT");
+safeAlter("ALTER TABLE conversations ADD COLUMN show_thinking INTEGER");

@@ -38,7 +38,12 @@ interface ChatState {
   // Actions
   loadConversations: () => Promise<void>;
   createConversation: (
-    init?: Partial<Pick<Conversation, "title" | "provider" | "model" | "agentId">>,
+    init?: Partial<
+      Pick<
+        Conversation,
+        "title" | "provider" | "model" | "agentId" | "reasoningEffort" | "showThinking"
+      >
+    >,
   ) => Promise<Conversation>;
   selectConversation: (id: string | null) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
@@ -46,7 +51,16 @@ interface ChatState {
   updateConversationSettings: (
     id: string,
     patch: Partial<
-      Pick<Conversation, "provider" | "model" | "systemPrompt" | "temperature" | "agentId">
+      Pick<
+        Conversation,
+        | "provider"
+        | "model"
+        | "systemPrompt"
+        | "temperature"
+        | "agentId"
+        | "reasoningEffort"
+        | "showThinking"
+      >
     >,
   ) => Promise<void>;
   deleteMessage: (id: string) => Promise<void>;
@@ -60,7 +74,13 @@ interface ChatState {
   // Streaming
   sendMessage: (
     content: string,
-    opts?: { regenerate?: boolean; editLastUser?: boolean; useTools?: boolean },
+    opts?: {
+      regenerate?: boolean;
+      editLastUser?: boolean;
+      useTools?: boolean;
+      reasoningEffort?: "low" | "medium" | "high" | "xhigh";
+      showThinking?: boolean;
+    },
   ) => Promise<void>;
   stop: () => void;
 }
@@ -87,6 +107,8 @@ export const useChat = create<ChatState>((set, get) => ({
       model: init?.model ?? "mock-1",
       title: init?.title,
       agentId: init?.agentId ?? null,
+      reasoningEffort: init?.reasoningEffort ?? null,
+      showThinking: init?.showThinking ?? true,
     });
     set((s) => ({
       conversations: [conv, ...s.conversations],
@@ -252,6 +274,7 @@ export const useChat = create<ChatState>((set, get) => ({
 
     try {
       let acc = "";
+      let accReasoning = "";
       for await (const ev of api.streamChat(
         {
           conversationId: activeId,
@@ -259,6 +282,8 @@ export const useChat = create<ChatState>((set, get) => ({
           regenerate: opts?.regenerate,
           editLastUser: opts?.editLastUser,
           useTools: opts?.useTools,
+          reasoningEffort: opts?.reasoningEffort,
+          showThinking: opts?.showThinking,
         },
         ac.signal,
         {
@@ -273,6 +298,21 @@ export const useChat = create<ChatState>((set, get) => ({
             messages: s.messages.map((m) =>
               m.id === placeholderId ? { ...m, content: acc } : m,
             ),
+          }));
+        } else if (ev.type === "reasoning_delta") {
+          accReasoning += ev.text;
+          // Stage the live reasoning trace on the placeholder so the UI
+          // can render a streaming thinking block. The server will rewrite
+          // the parts blob on `message`.
+          set((s) => ({
+            messages: s.messages.map((m) => {
+              if (m.id !== placeholderId) return m;
+              const parts: NonNullable<ChatMessage["parts"]> = (
+                (m.parts ?? []) as NonNullable<ChatMessage["parts"]>
+              ).filter((p) => p.type !== "reasoning");
+              parts.unshift({ type: "reasoning", text: accReasoning });
+              return { ...m, parts };
+            }),
           }));
         } else if (ev.type === "message") {
           set((s) => ({
