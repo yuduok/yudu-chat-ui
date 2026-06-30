@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useChat } from "@/store/chat";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -8,28 +8,45 @@ import { exportToMarkdown, exportToPng, downloadBlob, safeFilename } from "@/lib
 
 /**
  * Tab strip that lives where the conversation title used to be in the
- * header. Each tab represents one conversation; the active tab drives
- * the chat view via the store. Tabs are horizontally scrollable when
- * they overflow, and each one has a close button that removes the
- * conversation via the existing `deleteConversation` action.
+ * header. Tabs are driven by the `openTabs` slice of the chat store —
+ * the user opens a tab by clicking a sidebar entry, by creating a new
+ * chat, or by importing a conversation; they close a tab with the
+ * in-tab × button. Closing a tab only removes it from the strip; the
+ * underlying conversation is **not** deleted from the DB and stays
+ * available in the sidebar for re-opening. To actually delete a
+ * conversation, use the sidebar's delete menu.
  */
 export function ConversationTabs() {
   const { t } = useI18n();
   const conversations = useChat((s) => s.conversations);
+  const openTabs = useChat((s) => s.openTabs);
   const activeId = useChat((s) => s.activeId);
   const select = useChat((s) => s.selectConversation);
-  const remove = useChat((s) => s.deleteConversation);
+  const closeTab = useChat((s) => s.closeTab);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll the active tab into view when conversations change.
+  // Materialize the strip by looking each open-tab id up in the full
+  // conversation list. We do this in a memo so a conversation rename
+  // (which mutates the row but not openTabs) is reflected without
+  // re-rendering the rest of the strip.
+  const tabs = useMemo(
+    () =>
+      openTabs
+        .map((id) => conversations.find((c) => c.id === id))
+        .filter((c): c is NonNullable<typeof c> => Boolean(c)),
+    [openTabs, conversations],
+  );
+
+  // Auto-scroll the active tab into view when the active id or the
+  // tab set changes.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const active = el.querySelector<HTMLElement>(`[data-tab-id="${activeId}"]`);
     if (active) active.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
-  }, [activeId, conversations.length]);
+  }, [activeId, tabs.length]);
 
-  if (conversations.length === 0) {
+  if (tabs.length === 0) {
     return (
       <div className="flex h-9 items-center text-xs text-muted-foreground">
         {t("tabs.empty")}
@@ -70,7 +87,7 @@ export function ConversationTabs() {
         role="tablist"
         aria-label={t("tabs.list")}
       >
-        {conversations.map((c, idx) => {
+        {tabs.map((c) => {
           const isActive = c.id === activeId;
           return (
             <div
@@ -99,7 +116,7 @@ export function ConversationTabs() {
                 }
                 if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
                 e.preventDefault();
-                const list = conversations;
+                const list = tabs;
                 const i = list.findIndex((x) => x.id === c.id);
                 const target =
                   e.key === "Home"
@@ -113,7 +130,6 @@ export function ConversationTabs() {
                   el?.focus();
                   if (next.id !== activeId) void select(next.id);
                 }
-                void idx;
               }}
             >
               <span className="max-w-[180px] truncate">{c.title || "New Chat"}</span>
@@ -124,9 +140,13 @@ export function ConversationTabs() {
                   isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100",
                 )}
                 aria-label={t("tabs.close")}
+                title={t("tabs.close")}
                 onClick={(e) => {
                   e.stopPropagation();
-                  void remove(c.id);
+                  // Closing a tab only removes it from the header
+                  // strip; the conversation itself stays in the DB
+                  // and remains reachable from the sidebar.
+                  closeTab(c.id);
                 }}
               >
                 <X className="h-3 w-3" />

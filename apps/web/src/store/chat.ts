@@ -35,7 +35,20 @@ interface ChatState {
   activeToolCalls: ActiveToolCall[];
   activeAgentEvents: ActiveAgentEvent[];
 
+  // Open tabs — the set of conversation ids the user has chosen to
+  // keep in the header tab strip. Persisted to localStorage so a
+  // refresh restores the same layout. Distinct from `conversations`
+  // (the full DB list shown in the sidebar) and from `activeId` (the
+  // currently focused conversation). Closing a tab removes its id
+  // from this set; the conversation itself stays in the DB and in the
+  // sidebar so the user can re-open it.
+  openTabs: string[];
+
   // Actions
+  // Drop a tab from the header strip without touching the DB. If the
+  // tab being closed is the active one, the next available tab (or
+  // `null` if none) becomes the active conversation.
+  closeTab: (id: string) => void;
   loadConversations: () => Promise<void>;
   createConversation: (
     init?: Partial<
@@ -99,10 +112,49 @@ export const useChat = create<ChatState>((set, get) => ({
   error: null,
   activeToolCalls: [],
   activeAgentEvents: [],
+  openTabs: [],
+
+  closeTab(id) {
+    set((s) => {
+      const next = s.openTabs.filter((x) => x !== id);
+      const stillActive = s.activeId === id ? (next[0] ?? null) : s.activeId;
+      return {
+        openTabs: next,
+        // If we just closed the active tab, move focus to the next
+        // available tab (or clear the active conversation entirely if
+        // there are none left).
+        activeId: stillActive,
+        messages: s.activeId === id && stillActive === null ? [] : s.messages,
+      };
+    });
+    const focused = get().activeId;
+    if (focused) {
+      // Re-load messages for the now-active tab.
+      api.getConversation(focused).then((detail) => {
+        // Guard: the user might have switched tabs again before the
+        // request resolved.
+        if (get().activeId !== focused) return;
+        set({ messages: detail.messages });
+      }).catch(() => {});
+    }
+  },
 
   async loadConversations() {
     const list = await api.listConversations();
-    set({ conversations: list });
+    set((s) => {
+      // Reconcile openTabs with the latest server list. We keep any
+      // existing open tab that's still in the DB; we drop any that
+      // have been removed server-side; if the user has never opened
+      // a tab in this session, we seed the strip with the most
+      // recently updated conversation so the UI is never empty.
+      const ids = new Set(list.map((c) => c.id));
+      const kept = s.openTabs.filter((id) => ids.has(id));
+      const seed = kept.length === 0 && list.length > 0 ? [list[0].id] : [];
+      return {
+        conversations: list,
+        openTabs: kept.length > 0 ? kept : seed,
+      };
+    });
   },
 
   // Import a previously-exported conversation JSON object. The server
@@ -120,6 +172,7 @@ export const useChat = create<ChatState>((set, get) => ({
       activeToolCalls: [],
       activeAgentEvents: [],
       error: null,
+      openTabs: s.openTabs.includes(conv.id) ? s.openTabs : [conv.id, ...s.openTabs],
     }));
     const detail = await api.getConversation(conv.id);
     set({ messages: detail.messages });
@@ -142,19 +195,26 @@ export const useChat = create<ChatState>((set, get) => ({
       messages: [],
       activeToolCalls: [],
       activeAgentEvents: [],
+      // Auto-open the new conversation in the tab strip.
+      openTabs: s.openTabs.includes(conv.id) ? s.openTabs : [conv.id, ...s.openTabs],
     }));
     return conv;
   },
 
   async selectConversation(id) {
     if (get().streaming) get().stop();
-    set({
+    set((s) => ({
       activeId: id,
       messages: [],
       error: null,
       activeToolCalls: [],
       activeAgentEvents: [],
-    });
+      // Selecting a sidebar entry (or anything that focuses a
+      // conversation) should also pin its tab in the header so the
+      // user can switch back to it without re-opening from the
+      // sidebar.
+      openTabs: id == null || s.openTabs.includes(id) ? s.openTabs : [id, ...s.openTabs],
+    }));
     if (!id) return;
     const detail = await api.getConversation(id);
     set({ messages: detail.messages });
@@ -173,6 +233,7 @@ export const useChat = create<ChatState>((set, get) => ({
       activeToolCalls: s.activeId === id ? [] : s.activeToolCalls,
       activeAgentEvents: s.activeId === id ? [] : s.activeAgentEvents,
       error: s.activeId === id ? null : s.error,
+      openTabs: s.openTabs.filter((x) => x !== id),
     }));
   },
 
