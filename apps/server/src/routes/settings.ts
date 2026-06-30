@@ -1,7 +1,4 @@
 import type { FastifyInstance } from "fastify";
-
-// Settings (API keys + base URLs) live in a small JSON file in data/.
-// This keeps secrets out of SQLite for easier backup/encryption later.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -12,12 +9,11 @@ const settingsPath = path.join(dataDir, "settings.json");
 export interface ProviderSetting {
   apiKey?: string;
   baseUrl?: string;
+  manualModels?: string[];
 }
 
 export interface AppSettings {
-  // Provider key -> settings. API keys never round-trip back to the client.
   providers: Record<string, ProviderSetting>;
-  // UI preferences
   ui: { theme: "light" | "dark" | "system" };
 }
 
@@ -50,39 +46,53 @@ function maskKey(k?: string): string | undefined {
 }
 
 export async function settingsRoutes(app: FastifyInstance) {
-  // Return settings with keys masked
+  // GET: returns masked keys, never the raw secret
   app.get("/api/settings", async () => {
     const s = readSettings();
-    const masked: Record<string, { apiKeyMasked?: string; baseUrl?: string }> = {};
+    const masked: Record<string, { apiKeyMasked?: string; baseUrl?: string; manualModels: string[] }> = {};
     for (const [k, v] of Object.entries(s.providers)) {
-      masked[k] = { apiKeyMasked: maskKey(v.apiKey), baseUrl: v.baseUrl };
+      masked[k] = {
+        apiKeyMasked: maskKey(v.apiKey),
+        baseUrl: v.baseUrl,
+        manualModels: v.manualModels ?? [],
+      };
     }
     return { providers: masked, ui: s.ui };
   });
 
-  app.put<{ Body: AppSettings }>("/api/settings", async (req) => {
-    const incoming = req.body;
+  // PUT: partial merge; masked placeholders for apiKey keep the existing secret
+  app.put<{
+    Body: {
+      providers?: Record<string, { apiKey?: string; baseUrl?: string; manualModels?: string[] }>;
+      ui?: { theme?: "light" | "dark" | "system" };
+    };
+  }>("/api/settings", async (req) => {
+    const incoming = req.body ?? {};
     const current = readSettings();
 
-    // Merge per-provider settings; accept either a real key or a masked
-    // placeholder to indicate "keep existing".
     const merged: Record<string, ProviderSetting> = { ...current.providers };
     for (const [k, v] of Object.entries(incoming.providers ?? {})) {
       const prev = merged[k] ?? {};
       const next: ProviderSetting = { ...prev };
       if (typeof v.baseUrl === "string") next.baseUrl = v.baseUrl;
       if (typeof v.apiKey === "string") {
+        // Placeholder pattern => keep the existing key
         if (v.apiKey.includes("...") || v.apiKey === "****") {
-          // keep previous
+          // keep prev.apiKey
         } else {
           next.apiKey = v.apiKey;
         }
+      }
+      if (Array.isArray(v.manualModels)) {
+        next.manualModels = Array.from(
+          new Set(v.manualModels.filter((s) => typeof s === "string" && s.trim().length > 0).map((s) => s.trim())),
+        );
       }
       merged[k] = next;
     }
     const next: AppSettings = {
       providers: merged,
-      ui: incoming.ui ?? current.ui,
+      ui: incoming.ui?.theme ? { ...current.ui, theme: incoming.ui.theme } : current.ui,
     };
     writeSettings(next);
     return { ok: true };

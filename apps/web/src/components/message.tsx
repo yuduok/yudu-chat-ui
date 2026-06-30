@@ -5,10 +5,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Markdown } from "@/components/markdown";
 import { useChat } from "@/store/chat";
+import { useI18n } from "@/i18n";
 import type { ChatMessage as Msg } from "@yudu/shared";
 import { cn } from "@/lib/utils";
 
 export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
+  const { t } = useI18n();
   const send = useChat((s) => s.sendMessage);
   const del = useChat((s) => s.deleteMessage);
   const streaming = useChat((s) => s.streaming);
@@ -40,7 +42,7 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
             <Textarea value={draft} onChange={(e) => setDraft(e.target.value)} className="min-h-[80px]" />
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
-                Cancel
+                {t("message.cancel")}
               </Button>
               <Button
                 size="sm"
@@ -49,7 +51,7 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
                   await send(draft, { editLastUser: true });
                 }}
               >
-                Save & Submit
+                {t("message.edit")}
               </Button>
             </div>
           </div>
@@ -82,11 +84,12 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
                       setCopied(true);
                       setTimeout(() => setCopied(false), 1200);
                     }}
+                    aria-label={t(copied ? "message.copied" : "message.copy")}
                   >
                     {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>Copy</TooltipContent>
+                <TooltipContent>{t("message.copy")}</TooltipContent>
               </Tooltip>
               {isUser && (
                 <Tooltip>
@@ -97,11 +100,12 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
                         setDraft(msg.content);
                         setEditing(true);
                       }}
+                      aria-label={t("message.edit")}
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent>Edit & resubmit</TooltipContent>
+                  <TooltipContent>{t("message.edit")}</TooltipContent>
                 </Tooltip>
               )}
               {isAssistant && isLast && (
@@ -111,11 +115,12 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
                       className="rounded p-1 hover:bg-foreground/10"
                       onClick={() => send("", { regenerate: true })}
                       disabled={streaming}
+                      aria-label={t("message.regenerate")}
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent>Regenerate</TooltipContent>
+                  <TooltipContent>{t("message.regenerate")}</TooltipContent>
                 </Tooltip>
               )}
               <Tooltip>
@@ -123,11 +128,12 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
                   <button
                     className="rounded p-1 hover:bg-foreground/10"
                     onClick={() => del(msg.id)}
+                    aria-label={t("message.delete")}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>Delete</TooltipContent>
+                <TooltipContent>{t("message.delete")}</TooltipContent>
               </Tooltip>
             </div>
           </div>
