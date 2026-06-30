@@ -443,6 +443,7 @@ async function runAgentTurn(opts: {
       },
     });
     sendSse(stream, { type: "agent_finished", agentId, label });
+    sendSse(stream, { type: "done" });
   }
 
   return {
