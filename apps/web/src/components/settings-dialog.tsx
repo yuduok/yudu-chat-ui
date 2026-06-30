@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
@@ -11,7 +12,15 @@ import { useTheme } from "@/hooks/use-theme";
 import { useI18n, type Locale } from "@/i18n";
 import type { ProviderConfig } from "@yudu/shared";
 import { toast } from "sonner";
-import { Eye, EyeOff, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Check, Eye, EyeOff, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+
+// Per-provider memory of the most recent fetch and per-row selection state.
+// Held in component state rather than zustand because it's transient UI state.
+interface FetchedModels {
+  models: string[];
+  source: "remote" | "fallback";
+  error?: string;
+}
 
 export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { t, locale, setLocale } = useI18n();
@@ -20,7 +29,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [active, setActive] = useState<string>("");
   const [manualInput, setManualInput] = useState("");
   const [fetching, setFetching] = useState(false);
-  const [fetchInfo, setFetchInfo] = useState<{ source: "remote" | "fallback"; error?: string } | null>(null);
+  const [fetched, setFetched] = useState<Record<string, FetchedModels>>({});
+  const [picked, setPicked] = useState<Record<string, string[]>>({});
   const { theme, setTheme } = useTheme();
   const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
 
@@ -41,7 +51,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       }
       setDraft(init);
       if (ps[0]) setActive(ps[0].id);
-      setFetchInfo(null);
+      setFetched({});
+      setPicked({});
     })();
   }, [open]);
 
@@ -71,16 +82,37 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     }));
   }
 
+  function togglePicked(id: string, model: string) {
+    setPicked((p) => {
+      const cur = p[id] ?? [];
+      const next = cur.includes(model) ? cur.filter((m) => m !== model) : [...cur, model];
+      return { ...p, [id]: next };
+    });
+  }
+
+  function addPicked(id: string) {
+    const sel = picked[id] ?? [];
+    if (sel.length === 0) return;
+    setDraft((d) => {
+      const cur = d[id]?.manualModels ?? [];
+      const merged = Array.from(new Set([...cur, ...sel]));
+      return { ...d, [id]: { ...d[id], manualModels: merged } };
+    });
+    // Clear picks for this provider after promoting them.
+    setPicked((p) => ({ ...p, [id]: [] }));
+    toast.success(t("settings.fetchedModelsAdded", { count: sel.length }));
+  }
+
   async function fetchModels(id: string) {
     setFetching(true);
-    setFetchInfo(null);
     try {
       const res = await api.getProviderModels(id, { remote: true });
-      setFetchInfo({ source: res.source, error: res.error });
+      setFetched((f) => ({
+        ...f,
+        [id]: { models: res.models, source: res.source, error: res.error },
+      }));
       if (res.source === "remote" && res.models.length) {
-        // Reflect any new defaults surfaced by the server without clobbering manual entries.
-        // We don't persist these — the conversation model select below uses the same endpoint.
-        toast.success(`${res.models.length} models loaded`);
+        toast.success(t("settings.fetchedCount", { count: res.models.length }));
       }
     } catch (err: any) {
       toast.error(err?.message ?? t("settings.fetchFailed"));
@@ -105,6 +137,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
   const activeDraft = active ? draft[active] : undefined;
   const activeProvider = providers.find((p) => p.id === active);
+  const activeFetched = active ? fetched[active] : undefined;
+  const activePicked = active ? picked[active] ?? [] : [];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -123,7 +157,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           <TabsContent value="providers" className="space-y-3">
             <div className="flex items-center gap-3">
               <Label className="shrink-0">{t("settings.provider")}</Label>
-              <Select value={active} onValueChange={(v) => { setActive(v); setFetchInfo(null); }}>
+              <Select value={active} onValueChange={setActive}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -137,25 +171,27 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               </Select>
             </div>
 
-            {active && activeDraft && (
+            {activeProvider && activeDraft && (
               <div className="space-y-3 rounded-md border p-4">
                 <div className="space-y-1.5">
-                  <Label htmlFor="apikey">{t("settings.apiKey")}</Label>
+                  <Label>{t("settings.apiKey")}</Label>
                   <div className="flex gap-2">
                     <Input
-                      id="apikey"
                       type={activeDraft.show ? "text" : "password"}
-                      placeholder={t("settings.apiKey.placeholder")}
                       value={activeDraft.apiKey}
                       onChange={(e) => setField(active, "apiKey", e.target.value)}
+                      placeholder={t("settings.apiKey.placeholder")}
                     />
                     <Button
-                      type="button"
                       variant="outline"
                       size="icon"
                       onClick={() =>
-                        setDraft((d) => ({ ...d, [active]: { ...d[active], show: !d[active].show } }))
+                        setDraft((d) => ({
+                          ...d,
+                          [active]: { ...d[active], show: !d[active].show },
+                        }))
                       }
+                      title={activeDraft.show ? "Hide" : "Show"}
                       aria-label={activeDraft.show ? "Hide" : "Show"}
                     >
                       {activeDraft.show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -163,17 +199,16 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   </div>
                   <p className="text-[11px] text-muted-foreground">{t("settings.apiKey.hint")}</p>
                 </div>
+
                 <div className="space-y-1.5">
-                  <Label htmlFor="baseurl">{t("settings.baseUrl")}</Label>
+                  <Label>{t("settings.baseUrl")}</Label>
                   <Input
-                    id="baseurl"
-                    placeholder="https://api.openai.com/v1"
                     value={activeDraft.baseUrl}
                     onChange={(e) => setField(active, "baseUrl", e.target.value)}
+                    placeholder="https://..."
                   />
                 </div>
 
-                {/* Models */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <Label>{t("settings.models")}</Label>
@@ -193,22 +228,69 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                     </Button>
                   </div>
 
-                  {fetchInfo && (
-                    <p className="text-[11px] text-muted-foreground">
-                      {fetchInfo.source === "remote"
-                        ? t("settings.source.remote")
-                        : t("settings.source.fallback")}
-                      {fetchInfo.error ? ` — ${fetchInfo.error}` : ""}
-                    </p>
-                  )}
+                  {/* Fetched models picker. Only render when we have a list
+                      to show; otherwise fall through to defaults chips. */}
+                  {activeFetched?.models.length ? (
+                    <div className="space-y-1.5 rounded-md border bg-muted/30 p-2">
+                      <div className="flex items-center justify-between px-1 text-[11px] text-muted-foreground">
+                        <span>
+                          {t("settings.fetchedModels")} ·{" "}
+                          {activeFetched.source === "remote"
+                            ? t("settings.source.remote")
+                            : t("settings.source.fallback")}
+                          {activeFetched.error ? ` — ${activeFetched.error}` : ""}
+                        </span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => addPicked(active)}
+                          disabled={activePicked.length === 0}
+                        >
+                          <Check className="mr-1 h-3.5 w-3.5" />
+                          {t("settings.fetchedModelsAdd", { count: activePicked.length })}
+                        </Button>
+                      </div>
+                      <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+                        {activeFetched.models.map((m) => {
+                          const already = (activeDraft.manualModels ?? []).includes(m);
+                          return (
+                            <label
+                              key={m}
+                              className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-[11px] hover:bg-background/60"
+                            >
+                              <Checkbox
+                                checked={activePicked.includes(m) || already}
+                                disabled={already}
+                                onCheckedChange={() => togglePicked(active, m)}
+                              />
+                              <code className={already ? "text-muted-foreground line-through" : ""}>{m}</code>
+                              {already && (
+                                <span className="ml-auto rounded bg-emerald-500/15 px-1 text-[10px] text-emerald-700 dark:text-emerald-300">
+                                  {t("settings.fetchedModelsAlready")}
+                                </span>
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
 
-                  {activeProvider?.models.length ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {activeProvider.models.map((m) => (
-                        <code key={m} className="rounded bg-muted px-1.5 py-0.5 text-[11px]">
-                          {m}
-                        </code>
-                      ))}
+                  {/* Built-in defaults (shown when no fetch result yet, or
+                      even after — useful as a reference of what ships OOTB). */}
+                  {activeProvider.models.length ? (
+                    <div className="space-y-1.5">
+                      <div className="text-[11px] font-medium text-muted-foreground">
+                        {t("settings.source.fallback")}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {activeProvider.models.map((m) => (
+                          <code key={m} className="rounded bg-muted px-1.5 py-0.5 text-[11px]">
+                            {m}
+                          </code>
+                        ))}
+                      </div>
                     </div>
                   ) : null}
 

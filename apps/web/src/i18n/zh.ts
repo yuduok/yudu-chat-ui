@@ -43,6 +43,13 @@ export const zh: Record<TranslationKey, string> = {
   "agent.empty": "运行时，工具调用与智能体事件会出现在这里。",
   "chat.agentAttribution": "由 {agent} 生成",
 
+  // Models picker (fetch result)
+  "settings.fetchedModels": "已获取的模型",
+  "settings.fetchedModelsAdd": "添加（{count}）",
+  "settings.fetchedModelsAlready": "已添加",
+  "settings.fetchedModelsAdded": "已添加 {count} 个模型",
+  "settings.fetchedCount": "已加载 {count} 个模型",
+
   // Settings dialog
   "settings.title": "设置",
   "settings.description": "配置模型供应商和界面偏好。密钥仅保存在本地。",
