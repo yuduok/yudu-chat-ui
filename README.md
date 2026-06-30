@@ -237,14 +237,16 @@ Adds two related capabilities on top of v3:
 Layered on top of v4:
 
 - **Conversation tabs** — the conversation title region in the header is
-  now a horizontal tab strip. Each persisted conversation shows up as a
-  tab; clicking a tab calls `selectConversation` and re-keys the chat
-  view; the active tab is highlighted and auto-scrolled into view as new
-  tabs are added or removed; each tab has a hover-revealed `×` that
-  deletes the underlying conversation via the existing
-  `deleteConversation` action. The sidebar history list remains as the
-  full list / rename entry point, so tabs are the "what's open" view
-  while the sidebar stays the catalogue.
+  now a horizontal tab strip. `loadConversations` mirrors every
+  persisted conversation into the strip, so the user sees *all* of
+  their chats in the header — not just the ones they have focused in
+  this session. Clicking a tab calls `selectConversation` and re-keys
+  the chat view; the active tab is highlighted and auto-scrolled into
+  view as new tabs are added or removed. Each tab has a hover-revealed
+  `×` that calls `closeTab`, which only removes the tab from the
+  header strip — the underlying conversation is **not** deleted from
+  the DB and stays available in the sidebar. To actually delete a
+  conversation, use the sidebar's delete menu.
 - **Import / export** — every tab exposes `JSON` / `MD` / `PNG` buttons
   next to the strip; the `Import` button in the header opens a file
   picker for `.json` exports. JSON is the canonical wire format and is

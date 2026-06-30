@@ -8,13 +8,14 @@ import { exportToMarkdown, exportToPng, downloadBlob, safeFilename } from "@/lib
 
 /**
  * Tab strip that lives where the conversation title used to be in the
- * header. Tabs are driven by the `openTabs` slice of the chat store —
- * the user opens a tab by clicking a sidebar entry, by creating a new
- * chat, or by importing a conversation; they close a tab with the
- * in-tab × button. Closing a tab only removes it from the strip; the
- * underlying conversation is **not** deleted from the DB and stays
- * available in the sidebar for re-opening. To actually delete a
- * conversation, use the sidebar's delete menu.
+ * header. `loadConversations` mirrors every persisted conversation
+ * into the strip so the user sees all of their chats in the header,
+ * not just the ones they have focused in this session. The active
+ * tab is highlighted and auto-scrolled into view as new tabs are
+ * added or removed. The in-tab × button calls `closeTab`, which only
+ * removes the tab from the strip; the underlying conversation stays
+ * in the DB and in the sidebar. To actually delete a conversation,
+ * use the sidebar's delete menu.
  */
 export function ConversationTabs() {
   const { t } = useI18n();

@@ -35,13 +35,13 @@ interface ChatState {
   activeToolCalls: ActiveToolCall[];
   activeAgentEvents: ActiveAgentEvent[];
 
-  // Open tabs — the set of conversation ids the user has chosen to
-  // keep in the header tab strip. Persisted to localStorage so a
-  // refresh restores the same layout. Distinct from `conversations`
-  // (the full DB list shown in the sidebar) and from `activeId` (the
-  // currently focused conversation). Closing a tab removes its id
-  // from this set; the conversation itself stays in the DB and in the
-  // sidebar so the user can re-open it.
+  // Open tabs — the conversation ids currently shown as tabs in the
+  // header strip. `loadConversations` mirrors every persisted
+  // conversation here so the strip is the user's at-a-glance view of
+  // all their chats (not just the ones they have focused this
+  // session). Closing a tab drops its id from this set; the
+  // conversation itself stays in `conversations` and the sidebar so
+  // the user can re-open it from there.
   openTabs: string[];
 
   // Actions
@@ -115,25 +115,32 @@ export const useChat = create<ChatState>((set, get) => ({
   openTabs: [],
 
   closeTab(id) {
-    set((s) => {
-      const next = s.openTabs.filter((x) => x !== id);
-      const stillActive = s.activeId === id ? (next[0] ?? null) : s.activeId;
-      return {
-        openTabs: next,
-        // If we just closed the active tab, move focus to the next
-        // available tab (or clear the active conversation entirely if
-        // there are none left).
-        activeId: stillActive,
-        messages: s.activeId === id && stillActive === null ? [] : s.messages,
-      };
+    // Decide the fallback active id *before* mutating state so the
+    // neighbor pick is based on the pre-close tab order.
+    const before = get();
+    const idx = before.openTabs.indexOf(id);
+    const stillInStrip = before.openTabs.filter((x) => x !== id);
+    let fallback: string | null = before.activeId;
+    if (before.activeId === id) {
+      // Prefer the next neighbor; otherwise the previous; otherwise
+      // whatever's still in the strip; otherwise null.
+      const next = stillInStrip[idx] ?? stillInStrip[idx - 1] ?? stillInStrip[0] ?? null;
+      fallback = next;
+    }
+    set({
+      openTabs: stillInStrip,
+      // If we just closed the active tab, move focus to the next
+      // available tab (or clear the active conversation entirely if
+      // there are none left).
+      activeId: fallback,
+      messages: fallback ? before.messages : [],
     });
-    const focused = get().activeId;
-    if (focused) {
+    if (fallback) {
       // Re-load messages for the now-active tab.
-      api.getConversation(focused).then((detail) => {
+      api.getConversation(fallback).then((detail) => {
         // Guard: the user might have switched tabs again before the
         // request resolved.
-        if (get().activeId !== focused) return;
+        if (get().activeId !== fallback) return;
         set({ messages: detail.messages });
       }).catch(() => {});
     }
@@ -141,19 +148,15 @@ export const useChat = create<ChatState>((set, get) => ({
 
   async loadConversations() {
     const list = await api.listConversations();
-    set((s) => {
-      // Reconcile openTabs with the latest server list. We keep any
-      // existing open tab that's still in the DB; we drop any that
-      // have been removed server-side; if the user has never opened
-      // a tab in this session, we seed the strip with the most
-      // recently updated conversation so the UI is never empty.
-      const ids = new Set(list.map((c) => c.id));
-      const kept = s.openTabs.filter((id) => ids.has(id));
-      const seed = kept.length === 0 && list.length > 0 ? [list[0].id] : [];
-      return {
-        conversations: list,
-        openTabs: kept.length > 0 ? kept : seed,
-      };
+    set({
+      conversations: list,
+      // Mirror the full conversation list into the tab strip so every
+      // persisted conversation is reachable from the header — not just
+      // the ones the user has explicitly focused in this session.
+      // Closing a tab removes its id from this set; the conversation
+      // itself stays in `conversations` (and the sidebar) until the
+      // user deletes it from there.
+      openTabs: list.map((c) => c.id),
     });
   },
 
@@ -195,7 +198,9 @@ export const useChat = create<ChatState>((set, get) => ({
       messages: [],
       activeToolCalls: [],
       activeAgentEvents: [],
-      // Auto-open the new conversation in the tab strip.
+      // Add the new conversation to the tab strip; other tabs keep
+      // their position so the user's existing strip layout is
+      // preserved.
       openTabs: s.openTabs.includes(conv.id) ? s.openTabs : [conv.id, ...s.openTabs],
     }));
     return conv;
@@ -209,11 +214,10 @@ export const useChat = create<ChatState>((set, get) => ({
       error: null,
       activeToolCalls: [],
       activeAgentEvents: [],
-      // Selecting a sidebar entry (or anything that focuses a
-      // conversation) should also pin its tab in the header so the
-      // user can switch back to it without re-opening from the
-      // sidebar.
-      openTabs: id == null || s.openTabs.includes(id) ? s.openTabs : [id, ...s.openTabs],
+      // No openTabs mutation needed: loadConversations mirrors every
+      // persisted conversation into the strip, so the focused
+      // conversation is already represented there.
+      openTabs: s.openTabs,
     }));
     if (!id) return;
     const detail = await api.getConversation(id);
