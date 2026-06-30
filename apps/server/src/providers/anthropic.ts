@@ -5,6 +5,26 @@ import type {
   ProviderMessage,
 } from "./types.js";
 
+// Map our 4-step reasoning depth to Anthropic's `thinking` block budget.
+// We deliberately under-budget at the high end so a single user message
+// can't blow past the model's max_tokens cap. xhigh is reserved for
+// Sonnet 4.5 / Opus 4 family where the provider supports 32k+ budgets.
+function thinkingBudgetFor(depth: string | undefined): number | null {
+  switch (depth) {
+    case "low":
+      return 1024;
+    case "medium":
+      return 4096;
+    case "high":
+      return 16384;
+    case "xhigh":
+      return 32768;
+    default:
+      return null;
+  }
+}
+
+
 // Anthropic Messages API with SSE streaming.
 // Docs: https://docs.anthropic.com/en/api/messages-streaming
 //
@@ -31,6 +51,7 @@ export class AnthropicProvider implements ChatProvider {
       messages.push(messageToAnthropic(m));
     }
 
+    const thinkingBudget = thinkingBudgetFor(input.reasoningEffort);
     const body: Record<string, unknown> = {
       model: input.model,
       max_tokens: 4096,
@@ -39,6 +60,12 @@ export class AnthropicProvider implements ChatProvider {
       messages,
       stream: true,
     };
+    if (thinkingBudget) {
+      // Anthropic requires temperature=1 when thinking is enabled; we
+      // drop the field entirely rather than guess.
+      delete body.temperature;
+      body.thinking = { type: "enabled", budget_tokens: thinkingBudget };
+    }
     if (input.tools && input.tools.length) {
       body.tools = input.tools.map((t) => ({
         name: t.name,
@@ -118,6 +145,8 @@ export class AnthropicProvider implements ChatProvider {
                 if (slot) slot.inputJson += delta.partial_json;
               } else if (typeof delta?.text === "string" && delta.text.length) {
                 yield { delta: delta.text };
+              } else if (delta?.type === "thinking_delta" && typeof delta.thinking === "string" && delta.thinking.length) {
+                yield { reasoningDelta: delta.thinking };
               }
             } else if (event === "content_block_stop") {
               const slot = blocks[json.index ?? blocks.length - 1];

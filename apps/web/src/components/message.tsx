@@ -2,8 +2,11 @@ import { useState } from "react";
 import {
   AlertTriangle,
   Bot,
+  Brain,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Copy,
   Loader2,
   Pencil,
@@ -105,6 +108,7 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
             {msg.parts?.some((p) => p.type === "tool_call") && (
               <ToolCallChips parts={msg.parts} />
             )}
+            <ReasoningBlock parts={msg.parts} />
             {msg.content ? <Markdown>{msg.content}</Markdown> : null}
           </div>
         ) : (
@@ -281,5 +285,49 @@ export function ToolCallRow({
         </pre>
       )}
     </div>
+  );
+}
+
+// Reasoning / thinking trace block. Only renders when:
+//   1. The conversation has reasoning parts in the message.
+//   2. The conversation's showThinking flag is true.
+//
+// The block is a collapsed <details> by default; once the user opens it
+// we leave it open for the rest of the session (component-local state).
+// While the trace is still streaming we render an inline spinner to
+// signal that the model hasn't finished thinking yet.
+function ReasoningBlock({ parts }: { parts?: Msg["parts"] | null }) {
+  const { t } = useI18n();
+  const conversations = useChat((s) => s.conversations);
+  const activeId = useChat((s) => s.activeId);
+  const active = conversations.find((c) => c.id === activeId);
+  const showThinking = active?.showThinking !== false;
+  const streaming = useChat((s) => s.streaming);
+
+  const [open, setOpen] = useState(false);
+  const traceParts = (parts ?? []).filter(
+    (p): p is Extract<ContentPart, { type: "reasoning" }> => p.type === "reasoning",
+  );
+  if (!showThinking || traceParts.length === 0) return null;
+  const text = traceParts.map((p) => p.text).join("\n\n");
+
+  return (
+    <details
+      open={open}
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+      className="rounded-md border border-dashed border-violet-300/60 bg-violet-500/5 px-3 py-2 text-xs text-muted-foreground dark:border-violet-400/40 dark:bg-violet-500/10"
+    >
+      <summary className="flex cursor-pointer select-none items-center gap-1.5 font-medium text-violet-700 dark:text-violet-300">
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        <Brain className="h-3 w-3" />
+        {t("reasoning.thinking")}
+        {streaming && text.length === 0 && (
+          <Loader2 className="ml-1 h-3 w-3 animate-spin" />
+        )}
+      </summary>
+      <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground/80">
+        {text}
+      </pre>
+    </details>
   );
 }

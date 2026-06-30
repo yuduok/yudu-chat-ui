@@ -38,19 +38,33 @@ function messageToProvider(m: ChatMessage): ProviderMessage {
   if (m.parts && Array.isArray(m.parts) && m.parts.length) {
     // Translate content-side tool_call / tool_result parts into provider-side
     // tool_use / tool_result parts. Also populate the convenience toolCalls
-    // snapshot for adapters that prefer it.
+    // snapshot for adapters that prefer it. Reasoning parts are chat-side
+    // only — drop them before forwarding upstream.
     const toolCalls: NonNullable<ProviderMessage["toolCalls"]> = [];
-    const providerParts = m.parts.map((p): ProviderMessage["parts"] extends infer X ? X extends Array<infer E> ? E : never : never => {
+    const providerParts: NonNullable<ProviderMessage["parts"]> = [];
+    for (const p of m.parts) {
       if (p.type === "tool_call") {
         toolCalls.push({ id: p.id, name: p.name, arguments: p.arguments });
-        return { type: "tool_use", id: p.id, name: p.name, input: parseArgs(p.arguments) } as any;
+        providerParts.push({
+          type: "tool_use",
+          id: p.id,
+          name: p.name,
+          input: parseArgs(p.arguments),
+        });
+      } else if (p.type === "tool_result") {
+        providerParts.push({
+          type: "tool_result",
+          toolUseId: p.toolCallId,
+          content: p.content,
+          isError: p.isError,
+        });
+      } else if (p.type === "text") {
+        providerParts.push({ type: "text", text: p.text });
+      } else if (p.type === "image_url") {
+        providerParts.push({ type: "image_url", image_url: p.image_url });
       }
-      if (p.type === "tool_result") {
-        return { type: "tool_result", toolUseId: p.toolCallId, content: p.content, isError: p.isError } as any;
-      }
-      if (p.type === "text") return { type: "text", text: p.text } as any;
-      return { type: "image_url", image_url: p.image_url } as any;
-    }) as any;
+      // p.type === "reasoning" is intentionally dropped — chat-only.
+    }
     const out: ProviderMessage = { role: m.role, content: m.content, parts: providerParts };
     if (toolCalls.length) out.toolCalls = toolCalls;
     return out;
@@ -183,6 +197,11 @@ async function runAgentTurn(opts: {
   model: string;
   systemPrompt: string | null | undefined;
   temperature: number;
+  // Reasoning controls forwarded to the provider. `showThinking` only
+  // gates the SSE channel; the server still collects + persists reasoning
+  // deltas so toggling the UI later doesn't lose history.
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
+  showThinking?: boolean;
   // When true, this is the last agent in a chain — its text response
   // becomes the user-visible assistant message and is committed to the
   // conversation.
@@ -203,6 +222,8 @@ async function runAgentTurn(opts: {
     model,
     systemPrompt,
     temperature,
+    reasoningEffort,
+    showThinking = true,
     isFinal,
   } = opts;
 
@@ -217,6 +238,7 @@ async function runAgentTurn(opts: {
   sendSse(stream, { type: "agent_started", agentId, label });
 
   let acc = "";
+  let accReasoning = "";
   let promptTokens = 0;
   let completionTokens = 0;
   const collectedToolCalls: Array<{ id: string; name: string; arguments: Record<string, unknown> | string }> = [];
@@ -234,6 +256,7 @@ async function runAgentTurn(opts: {
       baseUrl: setting.baseUrl,
       tools: tools.length ? tools : undefined,
       toolChoice: tools.length ? "auto" : undefined,
+      reasoningEffort,
     })) {
       if (chunk.delta) {
         acc += chunk.delta;
@@ -251,6 +274,17 @@ async function runAgentTurn(opts: {
           arguments: chunk.toolCall.arguments,
         });
         sendSse(stream, { type: "tool_call", call: chunk.toolCall });
+      }
+      if (chunk.reasoningDelta) {
+        accReasoning += chunk.reasoningDelta;
+        // Gate only the SSE channel; we keep accumulating so the part can
+        // be persisted on the assistant message.
+        if (showThinking) {
+          sendSse(stream, {
+            type: "reasoning_delta",
+            text: chunk.reasoningDelta,
+          });
+        }
       }
       if (chunk.toolResult) {
         const r = chunk.toolResult;
@@ -270,8 +304,40 @@ async function runAgentTurn(opts: {
       break;
     }
 
+    // Persist the assistant turn so far so the UI sees partial text even
+    // before tool execution completes. We re-persist with the final blob
+    // after the loop ends. Only the final agent writes the user-visible
+    // row; intermediate agents still seed their working history.
+    if (isFinal) {
+      const interimParts: ContentPart[] = [
+        ...(accReasoning ? [{ type: "reasoning", text: accReasoning } as ContentPart] : []),
+        ...(acc ? [{ type: "text", text: acc } as ContentPart] : []),
+        ...collectedToolCalls.map(
+          (c): ToolCallPart => ({
+            type: "tool_call",
+            id: c.id,
+            name: c.name,
+            arguments: c.arguments,
+          }),
+        ),
+      ];
+      await db
+        .update(messages)
+        .set({
+          content: acc,
+          parts: JSON.stringify(interimParts),
+          toolCallIds: JSON.stringify(collectedToolCalls.map((c) => c.id)),
+          promptTokens,
+          completionTokens,
+        })
+        .where(eq(messages.id, assistantMsg.id));
+    }
+
     // Build the assistant message parts (with tool_calls) and persist.
     const assistantParts: ContentPart[] = [
+      ...(accReasoning
+        ? [{ type: "reasoning", text: accReasoning } as ContentPart]
+        : []),
       ...(acc ? [{ type: "text", text: acc } as ContentPart] : []),
       ...collectedToolCalls.map(
         (c): ToolCallPart => ({
@@ -369,9 +435,43 @@ async function runAgentTurn(opts: {
     }
 
     // Reset accumulators for the second iteration (model will see the
-    // tool results and produce a final answer).
+    // tool results and produce a final answer). We deliberately keep the
+    // reasoning accumulator between rounds so the persisted part still
+    // captures the model's full thinking session.
     acc = "";
     collectedToolCalls.length = 0;
+  }
+
+  // Persist the final assistant turn once the loop is done. Without this
+  // a plain text-only reply (no tool calls) leaves the placeholder row
+  // empty in the DB. Intermediate agents don't write to the user-visible
+  // row; the final agent in the chain does.
+  if (isFinal && (acc || accReasoning || promptTokens || completionTokens)) {
+    const finalParts: ContentPart[] = [
+      ...(accReasoning ? [{ type: "reasoning", text: accReasoning } as ContentPart] : []),
+      ...(acc ? [{ type: "text", text: acc } as ContentPart] : []),
+    ];
+    await db
+      .update(messages)
+      .set({
+        content: acc,
+        parts: finalParts.length ? JSON.stringify(finalParts) : null,
+        promptTokens,
+        completionTokens,
+      })
+      .where(eq(messages.id, assistantMsg.id));
+    sendSse(stream, { type: "usage", promptTokens, completionTokens });
+    sendSse(stream, {
+      type: "message",
+      message: {
+        ...assistantMsg,
+        content: acc,
+        parts: finalParts,
+        promptTokens,
+        completionTokens,
+      },
+    });
+    sendSse(stream, { type: "agent_finished", agentId, label });
   }
 
   return {
@@ -401,6 +501,22 @@ export async function chatRoutes(app: FastifyInstance) {
     const model = agent?.model ?? conv.model;
     const systemPrompt = agent?.systemPrompt ?? conv.systemPrompt ?? undefined;
     const temperature = agent?.temperature ?? conv.temperature ?? 0.7;
+    // Reasoning effort: per-turn override > agent > conversation > null.
+    const allowedEfforts = ["low", "medium", "high", "xhigh"] as const;
+    type Effort = (typeof allowedEfforts)[number];
+    const resolveEffort = (v: unknown): Effort | undefined =>
+      typeof v === "string" && (allowedEfforts as readonly string[]).includes(v)
+        ? (v as Effort)
+        : undefined;
+    const reasoningEffort =
+      resolveEffort(body.reasoningEffort) ??
+      resolveEffort(agent?.reasoningEffort) ??
+      resolveEffort(conv.reasoningEffort);
+    // showThinking: default true. The flag controls only the SSE channel;
+    // reasoning deltas are still collected + persisted server-side so the
+    // UI can flip the toggle without losing history.
+    const showThinking =
+      body.showThinking ?? agent?.showThinking ?? conv.showThinking ?? true;
     const tools = pickTools({ agent, useTools, providerId });
     const setting = getProviderSetting(providerId);
 
@@ -588,6 +704,8 @@ export async function chatRoutes(app: FastifyInstance) {
             model: linkModel,
             systemPrompt: linkSystem,
             temperature: linkTemp,
+            reasoningEffort,
+            showThinking,
             isFinal,
           });
         }

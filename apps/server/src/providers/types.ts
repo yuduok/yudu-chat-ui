@@ -1,5 +1,6 @@
 import type {
   ProviderContentPart,
+  ReasoningEffort,
   Role,
   ToolDefinition,
 } from "@yudu/shared";
@@ -35,11 +36,17 @@ export interface ProviderChatInput {
   // no tool support requested.
   tools?: ToolDefinition[];
   toolChoice?: ToolChoice;
+  // Reasoning effort requested from the model. Adapters map this onto
+  // their wire shape (OpenAI: `reasoning_effort`, Anthropic: `thinking`
+  // with a depth-derived budget). Providers that don't support reasoning
+  // silently ignore the value.
+  reasoningEffort?: ReasoningEffort;
 }
 
 export interface ProviderChatChunk {
   // Incremental text delta. Empty string is allowed (e.g. role markers).
-  delta: string;
+  // Optional because pure reasoning deltas carry no text.
+  delta?: string;
   // Streamed tool call. Yielded once the adapter has the full call.
   // Adapters that don't accumulate `tool_calls` deltas don't yield this.
   toolCall?: {
@@ -57,6 +64,9 @@ export interface ProviderChatChunk {
     isError?: boolean;
     agentId?: string;
   };
+  // Incremental reasoning / thinking delta. Persisted into the
+  // assistant message's reasoning part alongside text deltas.
+  reasoningDelta?: string;
   // Agent lifecycle hook used by chain orchestration.
   agentEvent?: {
     kind: "started" | "finished";
