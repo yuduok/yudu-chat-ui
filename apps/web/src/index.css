@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5% 64.9%;
+    --radius: 0.5rem;
+  }
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+  }
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+}
+
+/* prose tweaks for chat bubbles */
+.bubble-prose p { @apply my-2 leading-relaxed; }
+.bubble-prose p:first-child { @apply mt-0; }
+.bubble-prose p:last-child { @apply mb-0; }
+.bubble-prose code:not(pre code) { @apply rounded bg-muted px-1 py-0.5 text-[0.85em]; }
+.bubble-prose pre { @apply my-2 overflow-x-auto rounded-md bg-zinc-950 p-3 text-zinc-100 text-[0.85rem]; }
+.bubble-prose pre code { @apply bg-transparent p-0 text-inherit; }
+.bubble-prose ul { @apply list-disc pl-6 my-2; }
+.bubble-prose ol { @apply list-decimal pl-6 my-2; }
+.bubble-prose h1, .bubble-prose h2, .bubble-prose h3 { @apply font-semibold mt-3 mb-1; }
+.bubble-prose h1 { @apply text-xl; }
+.bubble-prose h2 { @apply text-lg; }
+.bubble-prose h3 { @apply text-base; }
+.bubble-prose a { @apply text-primary underline underline-offset-2; }
+.bubble-prose blockquote { @apply border-l-2 border-muted-foreground/40 pl-3 italic text-muted-foreground; }
+.bubble-prose table { @apply my-2 w-full text-sm; }
+.bubble-prose th, .bubble-prose td { @apply border border-border px-2 py-1; }

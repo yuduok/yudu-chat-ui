@@ -1,0 +1,41 @@
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import path from "node:path";
+import fs from "node:fs";
+import * as schema from "./schema.js";
+
+const dataDir = path.resolve(process.cwd(), "data");
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+const dbPath = path.join(dataDir, "yudu-chat.db");
+
+const sqlite = new Database(dbPath);
+sqlite.pragma("journal_mode = WAL");
+
+export const db = drizzle(sqlite, { schema });
+export { schema };
+
+// Bootstrap tables (small project, no migrations needed yet)
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    system_prompt TEXT,
+    temperature REAL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    parts TEXT,
+    prompt_tokens INTEGER,
+    completion_tokens INTEGER,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
+`);

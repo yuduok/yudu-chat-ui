@@ -1,0 +1,15 @@
+{
+  "name": "yudu-chat-ui",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Personal AI chat UI with OpenAI/Anthropic compatible backends",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "dev:server": "pnpm --filter @yudu/server dev",
+    "dev:web": "pnpm --filter @yudu/web dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck"
+  },
+  "packageManager": "pnpm@9.10.0"
+}
