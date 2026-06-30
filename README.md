@@ -54,10 +54,28 @@ Add new providers by registering a `ChatProvider` in
 - Light / dark / system theme
 - Provider + base URL settings persisted to `apps/server/data/settings.json`
 
+## v2 highlights (feat/ui-improvements)
+
+Four self-contained UX additions layered on top of v1 — no new npm deps.
+
+- **i18n (English / 中文)** — self-rolled minimal i18n in
+  `apps/web/src/i18n/`. Auto-detects `navigator.language`, persisted in
+  `localStorage`. Switch from the chat header or Settings.
+- **Collapsible sidebar** — logo + per-conversation initials in collapsed
+  mode; state persisted in `localStorage`. Tooltips everywhere.
+- **Remote + manual model lists** —
+  `GET /api/providers/:id/models?remote=1` hits the upstream OpenAI
+  `/models` endpoint and merges defaults + manual + remote. Settings
+  dialog has a "Fetch models" button plus a manual list (Enter to add,
+  click ✕ to remove). Persisted in `data/settings.json`.
+- **Yudu Chat branding** — inline SVG `<Logo />` + `<Wordmark />` used
+  in the sidebar, empty state, and tab favicon.
+
 ## Endpoints
 
 - `GET /api/health`
 - `GET /api/providers`
+- `GET /api/providers/:id/models[?remote=1]`
 - `GET /api/conversations`, `POST /api/conversations`
 - `GET /api/conversations/:id`, `PATCH /api/conversations/:id`,
   `DELETE /api/conversations/:id`
