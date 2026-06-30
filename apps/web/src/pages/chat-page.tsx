@@ -4,26 +4,22 @@ import { MessageBubble } from "@/components/message";
 import { Composer } from "@/components/composer";
 import { Sidebar } from "@/components/sidebar";
 import { SettingsDialog } from "@/components/settings-dialog";
-import { AgentMenu } from "@/components/agent-menu";
-import { EffortMenu } from "@/components/effort-menu";
 import { ActivityDrawer } from "@/components/activity-drawer";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import * as api from "@/lib/api";
 import { useTheme } from "@/hooks/use-theme";
 import { useI18n, type Locale } from "@/i18n";
 import { Logo } from "@/components/logo";
-import { Activity, Moon, Sun, MonitorSmartphone, Languages, Brain } from "lucide-react";
+import { Activity, Moon, Sun, MonitorSmartphone, Languages } from "lucide-react";
 import type { AgentProfile } from "@yudu/shared";
 
 export function ChatPage() {
   const { t, locale, setLocale } = useI18n();
   const messages = useChat((s) => s.messages);
   const activeId = useChat((s) => s.activeId);
-  const streaming = useChat((s) => s.streaming);
   const error = useChat((s) => s.error);
   const convos = useChat((s) => s.conversations);
-  const updateConv = useChat((s) => s.updateConversationSettings);
   const activeToolCalls = useChat((s) => s.activeToolCalls);
   const activeAgentEvents = useChat((s) => s.activeAgentEvents);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -84,7 +80,7 @@ export function ChatPage() {
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, streaming]);
+  }, [messages]);
 
   const agentAttribution = active?.agentId
     ? agents.find((a) => a.id === active.agentId)?.label ?? active.agentId
@@ -101,66 +97,14 @@ export function ChatPage() {
         <header className="flex items-center justify-between gap-2 border-b bg-background/80 px-4 py-2 backdrop-blur sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             {active ? (
-              <>
-                <div className="flex min-w-0 flex-col">
-                  <div className="truncate text-sm font-medium">{active.title}</div>
-                  {agentAttribution && (
-                    <div className="truncate text-[10px] text-muted-foreground">
-                      {t("chat.agentAttribution", { agent: agentAttribution })}
-                    </div>
-                  )}
-                </div>
-                <div className="hidden h-4 w-px bg-border sm:block" />
-                <AgentMenu />
-                <EffortMenu />
-                <div className="hidden h-4 w-px bg-border sm:block" />
-                <Button
-                  variant={active.showThinking ? "secondary" : "ghost"}
-                  size="icon"
-                  className="h-8 w-8"
-                  aria-label={t("reasoning.toggle")}
-                  title={t("reasoning.toggle")}
-                  onClick={() => void updateConv(active.id, { showThinking: !active.showThinking })}
-                >
-                  <Brain className="h-4 w-4" />
-                </Button>
-                <div className="hidden items-center gap-2 sm:flex">
-                  <Select
-                    value={active.provider}
-                    onValueChange={(v) => void updateConv(active.id, { provider: v })}
-                  >
-                    <SelectTrigger className="h-8 w-[140px] text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(providers as { id: string; label: string }[]).map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={active.model}
-                    onValueChange={(v) => void updateConv(active.id, { model: v })}
-                  >
-                    <SelectTrigger className="h-8 w-[200px] text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {modelList.length === 0 ? (
-                        <SelectItem value={active.model}>{active.model}</SelectItem>
-                      ) : (
-                        modelList.map((m) => (
-                          <SelectItem key={m} value={m}>
-                            {m}
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </>
+              <div className="flex min-w-0 flex-col">
+                <div className="truncate text-sm font-medium">{active.title}</div>
+                {agentAttribution && (
+                  <div className="truncate text-[10px] text-muted-foreground">
+                    {t("chat.agentAttribution", { agent: agentAttribution })}
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Logo size={18} />
@@ -239,7 +183,13 @@ export function ChatPage() {
           )}
         </div>
 
-        {activeId && <Composer />}
+        {activeId && (
+          <Composer
+            providers={providers as { id: string; label: string; models: string[] }[]}
+            modelList={modelList}
+            agents={agents}
+          />
+        )}
       </main>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
