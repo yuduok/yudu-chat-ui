@@ -6,6 +6,9 @@ import { conversationRoutes } from "./routes/conversations.js";
 import { chatRoutes } from "./routes/chat.js";
 import { providerRoutes } from "./routes/providers.js";
 import { settingsRoutes } from "./routes/settings.js";
+import { agentRoutes } from "./routes/agents.js";
+import { loadAgents } from "./agents/index.js";
+import { registerBuiltinTools } from "./tools/builtin.js";
 
 const app = Fastify({
   logger: {
@@ -19,10 +22,15 @@ await app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024 } });
 
 app.get("/api/health", async () => ({ ok: true, ts: Date.now() }));
 
+// Bootstrap side-effects: load agent profiles and register built-in tools.
+registerBuiltinTools();
+await loadAgents();
+
 await app.register(conversationRoutes);
 await app.register(chatRoutes);
 await app.register(providerRoutes);
 await app.register(settingsRoutes);
+await app.register(agentRoutes);
 
 const port = Number(process.env.PORT ?? 8787);
 const host = process.env.HOST ?? "0.0.0.0";

@@ -10,6 +10,7 @@ export async function providerRoutes(app: FastifyInstance) {
       label: p.label,
       models: p.defaultModels,
       baseUrl: p.defaultBaseUrl,
+      supportsTools: p.supportsTools === true,
     }));
   });
 

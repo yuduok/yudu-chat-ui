@@ -17,6 +17,7 @@ function rowToConversation(row: typeof conversations.$inferSelect): Conversation
     model: row.model,
     systemPrompt: row.systemPrompt,
     temperature: row.temperature,
+    agentId: row.agentId ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -31,12 +32,17 @@ function rowToMessage(row: typeof messages.$inferSelect): ChatMessage {
       parts = null;
     }
   }
+  let toolCallIds: ChatMessage["toolCallIds"] = null;
+  if (row.toolCallIds) {
+    try { toolCallIds = JSON.parse(row.toolCallIds); } catch { toolCallIds = null; }
+  }
   return {
     id: row.id,
     conversationId: row.conversationId,
     role: row.role as ChatMessage["role"],
     content: row.content,
     parts,
+    toolCallIds,
     promptTokens: row.promptTokens,
     completionTokens: row.completionTokens,
     createdAt: row.createdAt,
@@ -61,6 +67,7 @@ export async function conversationRoutes(app: FastifyInstance) {
       model?: string;
       systemPrompt?: string;
       temperature?: number;
+      agentId?: string | null;
     };
   }>("/api/conversations", async (req) => {
     const id = nanoid();
@@ -73,6 +80,7 @@ export async function conversationRoutes(app: FastifyInstance) {
       model: body.model ?? "gpt-4o-mini",
       systemPrompt: body.systemPrompt ?? null,
       temperature: body.temperature ?? 0.7,
+      agentId: body.agentId ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -112,6 +120,7 @@ export async function conversationRoutes(app: FastifyInstance) {
       model: string;
       systemPrompt: string | null;
       temperature: number | null;
+      agentId: string | null;
     }>;
   }>("/api/conversations/:id", async (req, reply) => {
     const id = req.params.id;
@@ -122,6 +131,7 @@ export async function conversationRoutes(app: FastifyInstance) {
     if (typeof b.model === "string") patch.model = b.model;
     if (b.systemPrompt !== undefined) patch.systemPrompt = b.systemPrompt;
     if (b.temperature !== undefined) patch.temperature = b.temperature;
+    if (b.agentId !== undefined) patch.agentId = b.agentId;
     await db.update(conversations).set(patch).where(eq(conversations.id, id));
     const [conv] = await db.select().from(conversations).where(eq(conversations.id, id));
     if (!conv) return reply.code(404).send({ error: "Not found" });
