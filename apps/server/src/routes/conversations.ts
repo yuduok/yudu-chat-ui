@@ -178,4 +178,107 @@ export async function conversationRoutes(app: FastifyInstance) {
       return { ok: true };
     },
   );
+
+  // Export one conversation as a self-contained JSON document. The format
+  // matches the `ExportedConversation` shared type — schema=1, plus the
+  // full conversation row and ordered messages. The client renders this
+  // as `.json` directly, and converts it to `.md` / `.png` for the other
+  // export formats.
+  app.get<{ Params: { id: string } }>(
+    "/api/conversations/:id/export",
+    async (req, reply) => {
+      const id = req.params.id;
+      const [conv] = await db
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, id));
+      if (!conv) return reply.code(404).send({ error: "Not found" });
+      const msgRows = await db
+        .select()
+        .from(messages)
+        .where(eq(messages.conversationId, id))
+        .orderBy(messages.createdAt);
+      const payload = {
+        schema: 1,
+        exportedAt: new Date().toISOString(),
+        ...rowToConversation(conv),
+        messages: msgRows.map(rowToMessage),
+      };
+      const filename = (conv.title || "conversation").replace(/[^a-zA-Z0-9-_]+/g, "_").slice(0, 60) || "conversation";
+      reply.header("Content-Type", "application/json; charset=utf-8");
+      reply.header(
+        "Content-Disposition",
+        `attachment; filename="${filename}.json"`,
+      );
+      return reply.send(JSON.stringify(payload, null, 2));
+    },
+  );
+
+  // Import a previously-exported conversation. We mint a brand new id
+  // for the conversation and re-key the message rows so the import never
+  // collides with existing data. Schema 1 only for now.
+  app.post<{ Body: unknown }>("/api/conversations/import", async (req, reply) => {
+    const body = (req.body ?? {}) as any;
+    const src = (body.conversation ?? body) as any;
+    const schema = Number(src?.schema ?? 1);
+    if (schema !== 1) {
+      return reply.code(400).send({ error: `Unsupported export schema: ${schema}` });
+    }
+    const required = ["title", "provider", "model"];
+    for (const k of required) {
+      if (typeof src?.[k] !== "string") {
+        return reply.code(400).send({ error: `Missing field: ${k}` });
+      }
+    }
+    const now = Date.now();
+    const newId = nanoid();
+    const messageRows: Array<typeof messages.$inferInsert> = [];
+    const messagesSrc: unknown[] = Array.isArray(src.messages) ? src.messages : [];
+    const ALLOWED_ROLES = new Set(["system", "user", "assistant", "tool"]);
+    for (const m of messagesSrc) {
+      const mm = m as Record<string, unknown>;
+      if (typeof mm.id !== "string" || typeof mm.role !== "string") continue;
+      // Reject anything that isn't a known role so an attacker can't
+      // smuggle a row past the schema and into the provider layer.
+      if (!ALLOWED_ROLES.has(String(mm.role))) continue;
+      const parts = mm.parts ?? null;
+      const toolCallIds = mm.toolCallIds ?? null;
+      messageRows.push({
+        // Mint a fresh id so re-importing the same file (or a hand-
+        // edited export that collides with an existing row) can't
+        // blow up the messages primary key.
+        id: nanoid(),
+        conversationId: newId,
+        role: String(mm.role),
+        content: typeof mm.content === "string" ? mm.content : "",
+        parts: parts ? JSON.stringify(parts) : null,
+        toolCallIds: toolCallIds ? JSON.stringify(toolCallIds) : null,
+        promptTokens: typeof mm.promptTokens === "number" ? mm.promptTokens : null,
+        completionTokens: typeof mm.completionTokens === "number" ? mm.completionTokens : null,
+        createdAt: typeof mm.createdAt === "number" ? mm.createdAt : now,
+      });
+    }
+    const ALLOWED_EFFORT = new Set(["low", "medium", "high", "xhigh"]);
+    const safeEffort =
+      typeof src.reasoningEffort === "string" && ALLOWED_EFFORT.has(src.reasoningEffort)
+        ? src.reasoningEffort
+        : null;
+    const row = {
+      id: newId,
+      title: String(src.title),
+      provider: String(src.provider),
+      model: String(src.model),
+      systemPrompt: typeof src.systemPrompt === "string" ? src.systemPrompt : null,
+      temperature: typeof src.temperature === "number" ? src.temperature : 0.7,
+      agentId: typeof src.agentId === "string" ? src.agentId : null,
+      reasoningEffort: safeEffort,
+      showThinking: typeof src.showThinking === "boolean" ? src.showThinking : null,
+      createdAt: typeof src.createdAt === "number" ? src.createdAt : now,
+      updatedAt: now,
+    };
+    await db.insert(conversations).values(row);
+    if (messageRows.length) await db.insert(messages).values(messageRows);
+    const [conv] = await db.select().from(conversations).where(eq(conversations.id, newId));
+    return rowToConversation(conv);
+  });
 }

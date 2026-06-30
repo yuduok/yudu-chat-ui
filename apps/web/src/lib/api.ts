@@ -3,9 +3,11 @@ import type {
   ChatMessage,
   Conversation,
   ConversationWithMessages,
+  ExportedConversation,
   ProviderConfig,
   StreamEvent,
   ChatRequest,
+  UsageReport,
 } from "@yudu/shared";
 
 const BASE = "/api";
@@ -74,6 +76,35 @@ export async function deleteMessage(conversationId: string, messageId: string): 
   await fetch(`${BASE}/conversations/${conversationId}/messages/${messageId}`, { method: "DELETE" });
 }
 
+// Fetch the full exported JSON document for a conversation. Returns the
+// raw JSON text so the client can either save it as-is or transform it
+// (markdown / png) before download.
+export async function exportConversation(id: string): Promise<ExportedConversation> {
+  const r = await fetch(`${BASE}/conversations/${id}/export`);
+  if (!r.ok) throw new Error("exportConversation failed");
+  return r.json();
+}
+
+// Send a previously-downloaded JSON export to the server. Returns the
+// newly-created conversation row.
+export async function importConversation(payload: unknown): Promise<Conversation> {
+  const r = await fetch(`${BASE}/conversations/import`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    let detail = "";
+    try {
+      detail = JSON.stringify(await r.json());
+    } catch {
+      detail = await r.text();
+    }
+    throw new Error(`importConversation failed: ${detail}`);
+  }
+  return r.json();
+}
+
 export async function listProviders(): Promise<ProviderConfig[]> {
   const r = await fetch(`${BASE}/providers`);
   if (!r.ok) throw new Error("listProviders failed");
@@ -118,15 +149,27 @@ export async function getSettings(): Promise<Settings> {
 }
 
 export async function saveSettings(input: {
-  providers: Record<string, { apiKey?: string; baseUrl?: string; manualModels?: string[] }>;
+  providers: Record<string, { apiKey?: string | null; baseUrl?: string | null; manualModels?: string[] }>;
   ui?: { theme?: "light" | "dark" | "system" };
-}): Promise<void> {
-  await fetch(`${BASE}/settings`, {
+}): Promise<Settings> {
+  const r = await fetch(`${BASE}/settings`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
+  if (!r.ok) throw new Error("saveSettings failed");
+  return r.json();
 }
+
+// Aggregate token usage across every persisted conversation. Token counts
+// come from assistant messages only (user / tool / system never carry them).
+export async function getUsage(): Promise<UsageReport> {
+  const r = await fetch(`${BASE}/usage`);
+  if (!r.ok) throw new Error("getUsage failed");
+  return r.json();
+}
+
+export type { ChatMessage };
 
 export interface StreamCallbacks {
   onToolCall?: (call: {
@@ -195,5 +238,3 @@ export async function* streamChat(
     }
   }
 }
-
-export type { ChatMessage };

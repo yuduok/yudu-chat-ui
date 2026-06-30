@@ -7,6 +7,7 @@ import { chatRoutes } from "./routes/chat.js";
 import { providerRoutes } from "./routes/providers.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { agentRoutes } from "./routes/agents.js";
+import { usageRoutes } from "./routes/usage.js";
 import { loadAgents } from "./agents/index.js";
 import { registerBuiltinTools } from "./tools/builtin.js";
 
@@ -31,6 +32,7 @@ await app.register(chatRoutes);
 await app.register(providerRoutes);
 await app.register(settingsRoutes);
 await app.register(agentRoutes);
+await app.register(usageRoutes);
 
 const port = Number(process.env.PORT ?? 8787);
 const host = process.env.HOST ?? "0.0.0.0";

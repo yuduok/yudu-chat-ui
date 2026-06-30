@@ -231,6 +231,50 @@ Adds two related capabilities on top of v3:
   final-turn persist path emits `usage` / `message` / `agent_finished`
   / `done` and writes content even without tool calls.
 
+
+## v5 highlights (conversation tabs · import/export · usage)
+
+Layered on top of v4:
+
+- **Conversation tabs** — the conversation title region in the header is
+  now a horizontal tab strip. Each persisted conversation shows up as a
+  tab; clicking a tab calls `selectConversation` and re-keys the chat
+  view; the active tab is highlighted and auto-scrolled into view as new
+  tabs are added or removed; each tab has a hover-revealed `×` that
+  deletes the underlying conversation via the existing
+  `deleteConversation` action. The sidebar history list remains as the
+  full list / rename entry point, so tabs are the "what's open" view
+  while the sidebar stays the catalogue.
+- **Import / export** — every tab exposes `JSON` / `MD` / `PNG` buttons
+  next to the strip; the `Import` button in the header opens a file
+  picker for `.json` exports. JSON is the canonical wire format and is
+  the only import path; Markdown and PNG are derived client-side from
+  the same payload so the export formats never go stale.
+  - **Server** — `GET /api/conversations/:id/export` returns the
+    canonical `ExportedConversation` (`schema: 1`); `POST
+    /api/conversations/import` mints a fresh id for both the
+    conversation row and every message row, and validates the role
+    whitelist, so the import never collides with existing data.
+  - **Client** — `apps/web/src/lib/exporter.ts` renders the same
+    payload to Markdown (text + parts, with reasoning / tool calls
+    quoted) and to a PNG via a fixed-width canvas with line wrap. Both
+    writers are pure functions on `ExportedConversation`; the download
+    trigger is `downloadBlob(blob, filename)`.
+- **Usage report** — a new `GET /api/usage` endpoint aggregates
+  prompt / completion token counts across all assistant messages,
+  grouped by `provider` and by `(provider, model)`. The Activity drawer
+  (which now lives behind a tab bar — see the next bullet) exposes a
+  second tab called `Usage` that fetches the report on open, shows the
+  totals, and renders the per-provider and per-model breakdowns as
+  compact tables.
+- **Activity drawer fix** — `DialogContent` was rendering Radix's
+  default top-right close button on top of the in-header close button,
+  producing two X buttons. `DialogContent` now accepts a
+  `showCloseButton` prop (default `true`); the drawer opts out so the
+  header is the only close affordance and the duplicate is gone. The
+  drawer also picks up the new `Activity` / `Usage` tab bar from
+  `components/ui/tabs.tsx`.
+
 ## Endpoints
 
 - `GET /api/health`
@@ -249,3 +293,6 @@ Adds two related capabilities on top of v3:
 - `POST /api/conversations` / `PATCH /api/conversations/:id` — accept
   `reasoningEffort` and `showThinking` in addition to v3 fields.
 - `GET /api/settings`, `PUT /api/settings`
+- `GET /api/conversations/:id/export` — JSON download (schema 1)
+- `POST /api/conversations/import` — body is an ExportedConversation
+- `GET /api/usage` — token totals + per-provider / per-model buckets

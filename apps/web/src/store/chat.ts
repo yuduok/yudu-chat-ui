@@ -64,6 +64,10 @@ interface ChatState {
     >,
   ) => Promise<void>;
   deleteMessage: (id: string) => Promise<void>;
+  // Import a previously-exported conversation JSON object. The server
+  // re-keys ids so the import never collides with existing data; we
+  // then prepend the new conversation to the sidebar and select it.
+  importConversationFromObject: (payload: unknown) => Promise<Conversation>;
 
   // Activity actions (mostly internal; the sendMessage loop uses them)
   resetActivity: () => void;
@@ -101,6 +105,28 @@ export const useChat = create<ChatState>((set, get) => ({
     set({ conversations: list });
   },
 
+  // Import a previously-exported conversation JSON object. The server
+  // re-keys ids so the import never collides with existing data; we
+  // then prepend the new conversation to the sidebar and select it.
+  async importConversationFromObject(payload: unknown) {
+    if (get().streaming) get().stop();
+    const conv = await api.importConversation(payload);
+    set((s) => ({
+      conversations: [conv, ...s.conversations],
+      activeId: conv.id,
+      messages: [],
+      // Reset transient UI state from any prior conversation so the
+      // imported one starts with a clean Activity panel.
+      activeToolCalls: [],
+      activeAgentEvents: [],
+      error: null,
+    }));
+    const detail = await api.getConversation(conv.id);
+    set({ messages: detail.messages });
+    return conv;
+  },
+
+
   async createConversation(init) {
     const conv = await api.createConversation({
       provider: init?.provider ?? "mock",
@@ -135,11 +161,18 @@ export const useChat = create<ChatState>((set, get) => ({
   },
 
   async deleteConversation(id) {
+    // Abort any in-flight stream that belongs to this conversation
+    // before removing it so we don't try to persist a message into a
+    // conversation row that no longer exists.
+    if (get().activeId === id && get().streaming) get().stop();
     await api.deleteConversation(id);
     set((s) => ({
       conversations: s.conversations.filter((c) => c.id !== id),
       activeId: s.activeId === id ? null : s.activeId,
       messages: s.activeId === id ? [] : s.messages,
+      activeToolCalls: s.activeId === id ? [] : s.activeToolCalls,
+      activeAgentEvents: s.activeId === id ? [] : s.activeAgentEvents,
+      error: s.activeId === id ? null : s.error,
     }));
   },
 
