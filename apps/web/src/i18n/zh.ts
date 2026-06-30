@@ -100,4 +100,29 @@ export const zh: Record<TranslationKey, string> = {
   "chat.empty.cta": "新建对话",
   "chat.theme.toggle": "主题",
   "chat.appName": "语渡 Chat",
+
+  // Conversation tabs
+  "tabs.empty": "暂无会话",
+  "tabs.list": "会话标签",
+  "tabs.close": "关闭标签",
+
+  // Import / Export
+  "import.button": "导入",
+  "export.json": "导出为 JSON",
+  "export.md": "导出为 Markdown",
+  "export.png": "导出为 PNG",
+
+  // Usage report (Activity drawer tab)
+  "agent.activityTab": "活动",
+  "usage.tab": "用量",
+  "usage.loading": "正在加载用量…",
+  "usage.total": "总计",
+  "usage.prompt": "输入",
+  "usage.completion": "输出",
+  "usage.totalTokens": "总 token",
+  "usage.byProvider": "按供应商",
+  "usage.byModel": "按模型",
+  "usage.provider": "供应商",
+  "usage.model": "模型",
+  "usage.empty": "暂无用量记录。",
 };

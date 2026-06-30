@@ -100,6 +100,31 @@ export const en = {
   "settings.fetchedModelsAlready": "Added",
   "settings.fetchedModelsAdded": "Added {count} model(s)",
   "settings.fetchedCount": "{count} models loaded",
+
+  // Conversation tabs
+  "tabs.empty": "No conversations yet.",
+  "tabs.list": "Conversations",
+  "tabs.close": "Close tab",
+
+  // Import / Export
+  "import.button": "Import",
+  "export.json": "Export as JSON",
+  "export.md": "Export as Markdown",
+  "export.png": "Export as PNG",
+
+  // Usage report (Activity drawer tab)
+  "agent.activityTab": "Activity",
+  "usage.tab": "Usage",
+  "usage.loading": "Loading usage…",
+  "usage.total": "Total",
+  "usage.prompt": "Prompt",
+  "usage.completion": "Completion",
+  "usage.totalTokens": "Total tokens",
+  "usage.byProvider": "By provider",
+  "usage.byModel": "By model",
+  "usage.provider": "Provider",
+  "usage.model": "Model",
+  "usage.empty": "No usage recorded yet.",
 } as const;
 
 export type TranslationKey = keyof typeof en;

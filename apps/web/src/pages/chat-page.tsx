@@ -7,11 +7,12 @@ import { SettingsDialog } from "@/components/settings-dialog";
 import { ActivityDrawer } from "@/components/activity-drawer";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ConversationTabs } from "@/components/conversation-tabs";
 import * as api from "@/lib/api";
 import { useTheme } from "@/hooks/use-theme";
 import { useI18n, type Locale } from "@/i18n";
 import { Logo } from "@/components/logo";
-import { Activity, Moon, Sun, MonitorSmartphone, Languages } from "lucide-react";
+import { Activity, Moon, Sun, MonitorSmartphone, Languages, FileUp } from "lucide-react";
 import type { AgentProfile } from "@yudu/shared";
 
 export function ChatPage() {
@@ -20,6 +21,8 @@ export function ChatPage() {
   const activeId = useChat((s) => s.activeId);
   const error = useChat((s) => s.error);
   const convos = useChat((s) => s.conversations);
+  const loadConversations = useChat((s) => s.loadConversations);
+  const importFromObject = useChat((s) => s.importConversationFromObject);
   const activeToolCalls = useChat((s) => s.activeToolCalls);
   const activeAgentEvents = useChat((s) => s.activeAgentEvents);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -28,6 +31,7 @@ export function ChatPage() {
   const [modelList, setModelList] = useState<string[]>([]);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const { theme, setTheme } = useTheme();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const active = convos.find((c) => c.id === activeId);
 
@@ -89,30 +93,52 @@ export function ChatPage() {
   const activityCount =
     activeToolCalls.length + activeAgentEvents.length;
 
+  // Import flow: pick a JSON file, parse it, hand the parsed object to
+  // the store which posts it to /api/conversations/import and selects
+  // the new conversation.
+  async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      await importFromObject(payload);
+    } catch (err: any) {
+      // Surface a visible error in the chat body so the user knows
+      // the file was rejected.
+      useChat.setState({ error: err?.message ?? "Import failed" });
+    }
+  }
+
   return (
     <div className="flex h-full">
       <Sidebar onOpenSettings={() => setSettingsOpen(true)} />
       <main className="flex min-w-0 flex-1 flex-col">
         {/* Header */}
         <header className="flex items-center justify-between gap-2 border-b bg-background/80 px-4 py-2 backdrop-blur sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            {active ? (
-              <div className="flex min-w-0 flex-col">
-                <div className="truncate text-sm font-medium">{active.title}</div>
-                {agentAttribution && (
-                  <div className="truncate text-[10px] text-muted-foreground">
-                    {t("chat.agentAttribution", { agent: agentAttribution })}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Logo size={18} />
-                <span>{t("chat.noConversation")}</span>
-              </div>
-            )}
+          <div className="flex min-w-0 flex-1 items-center">
+            <ConversationTabs />
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={onImportFile}
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              title={t("import.button")}
+              aria-label={t("import.button")}
+              className="h-8 gap-1.5 text-xs"
+            >
+              <FileUp className="h-3.5 w-3.5" />
+              {t("import.button")}
+            </Button>
             <Button
               variant={activityCount > 0 ? "secondary" : "ghost"}
               size="sm"

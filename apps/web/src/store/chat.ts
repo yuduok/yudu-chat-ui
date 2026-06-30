@@ -64,6 +64,10 @@ interface ChatState {
     >,
   ) => Promise<void>;
   deleteMessage: (id: string) => Promise<void>;
+  // Import a previously-exported conversation JSON object. The server
+  // re-keys ids so the import never collides with existing data; we
+  // then prepend the new conversation to the sidebar and select it.
+  importConversationFromObject: (payload: unknown) => Promise<Conversation>;
 
   // Activity actions (mostly internal; the sendMessage loop uses them)
   resetActivity: () => void;
@@ -100,6 +104,18 @@ export const useChat = create<ChatState>((set, get) => ({
     const list = await api.listConversations();
     set({ conversations: list });
   },
+
+  // Import a previously-exported conversation JSON object. The server
+  // re-keys ids so the import never collides with existing data; we
+  // then prepend the new conversation to the sidebar and select it.
+  async importConversationFromObject(payload: unknown) {
+    const conv = await api.importConversation(payload);
+    set((s) => ({ conversations: [conv, ...s.conversations], activeId: conv.id, messages: [] }));
+    const detail = await api.getConversation(conv.id);
+    set({ messages: detail.messages });
+    return conv;
+  },
+
 
   async createConversation(init) {
     const conv = await api.createConversation({

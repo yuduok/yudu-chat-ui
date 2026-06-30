@@ -191,3 +191,29 @@ export interface ChatRequest {
   // `true` so first-run users see something.
   showThinking?: boolean;
 }
+
+// ---------- Usage / import-export ----------
+
+export interface UsageBucket {
+  provider: string;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  messageCount: number;
+}
+
+export interface UsageReport {
+  total: { promptTokens: number; completionTokens: number; totalTokens: number; messageCount: number };
+  byProvider: UsageBucket[];
+  byModel: UsageBucket[];
+  // ISO date string the report was generated at.
+  generatedAt: string;
+}
+
+export interface ExportedConversation extends ConversationWithMessages {
+  // Schema version for forward-compatible imports.
+  schema: 1;
+  // ISO date string the export was created at.
+  exportedAt: string;
+}
