@@ -304,35 +304,6 @@ async function runAgentTurn(opts: {
       break;
     }
 
-    // Persist the assistant turn so far so the UI sees partial text even
-    // before tool execution completes. We re-persist with the final blob
-    // after the loop ends. Only the final agent writes the user-visible
-    // row; intermediate agents still seed their working history.
-    if (isFinal) {
-      const interimParts: ContentPart[] = [
-        ...(accReasoning ? [{ type: "reasoning", text: accReasoning } as ContentPart] : []),
-        ...(acc ? [{ type: "text", text: acc } as ContentPart] : []),
-        ...collectedToolCalls.map(
-          (c): ToolCallPart => ({
-            type: "tool_call",
-            id: c.id,
-            name: c.name,
-            arguments: c.arguments,
-          }),
-        ),
-      ];
-      await db
-        .update(messages)
-        .set({
-          content: acc,
-          parts: JSON.stringify(interimParts),
-          toolCallIds: JSON.stringify(collectedToolCalls.map((c) => c.id)),
-          promptTokens,
-          completionTokens,
-        })
-        .where(eq(messages.id, assistantMsg.id));
-    }
-
     // Build the assistant message parts (with tool_calls) and persist.
     const assistantParts: ContentPart[] = [
       ...(accReasoning
