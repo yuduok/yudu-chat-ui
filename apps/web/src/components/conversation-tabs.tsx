@@ -70,22 +70,50 @@ export function ConversationTabs() {
         role="tablist"
         aria-label={t("tabs.list")}
       >
-        {conversations.map((c) => {
+        {conversations.map((c, idx) => {
           const isActive = c.id === activeId;
           return (
             <div
               key={c.id}
               data-tab-id={c.id}
               role="tab"
+              tabIndex={isActive ? 0 : -1}
               aria-selected={isActive}
               className={cn(
-                "group flex h-9 shrink-0 cursor-pointer items-center gap-1 rounded-md border px-3 text-xs",
+                "group flex h-9 shrink-0 cursor-pointer items-center gap-1 rounded-md border px-3 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 isActive
                   ? "border-primary/40 bg-primary/10 text-foreground"
                   : "border-transparent bg-muted/40 text-muted-foreground hover:bg-muted",
               )}
               onClick={() => {
                 if (!isActive) void select(c.id);
+              }}
+              onKeyDown={(e) => {
+                // Mirror Radix Tabs keyboard semantics: ArrowLeft/Right
+                // move focus between tabs, Home/End jump to the ends,
+                // Enter / Space activate the focused tab.
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  if (!isActive) void select(c.id);
+                  return;
+                }
+                if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+                e.preventDefault();
+                const list = conversations;
+                const i = list.findIndex((x) => x.id === c.id);
+                const target =
+                  e.key === "Home"
+                    ? 0
+                    : e.key === "End"
+                      ? list.length - 1
+                      : (i + (e.key === "ArrowRight" ? 1 : -1) + list.length) % list.length;
+                const next = list[target];
+                if (next) {
+                  const el = scrollRef.current?.querySelector<HTMLElement>(`[data-tab-id="${next.id}"]`);
+                  el?.focus();
+                  if (next.id !== activeId) void select(next.id);
+                }
+                void idx;
               }}
             >
               <span className="max-w-[180px] truncate">{c.title || "New Chat"}</span>

@@ -234,13 +234,20 @@ export async function conversationRoutes(app: FastifyInstance) {
     const newId = nanoid();
     const messageRows: Array<typeof messages.$inferInsert> = [];
     const messagesSrc: unknown[] = Array.isArray(src.messages) ? src.messages : [];
+    const ALLOWED_ROLES = new Set(["system", "user", "assistant", "tool"]);
     for (const m of messagesSrc) {
       const mm = m as Record<string, unknown>;
       if (typeof mm.id !== "string" || typeof mm.role !== "string") continue;
+      // Reject anything that isn't a known role so an attacker can't
+      // smuggle a row past the schema and into the provider layer.
+      if (!ALLOWED_ROLES.has(String(mm.role))) continue;
       const parts = mm.parts ?? null;
       const toolCallIds = mm.toolCallIds ?? null;
       messageRows.push({
-        id: mm.id,
+        // Mint a fresh id so re-importing the same file (or a hand-
+        // edited export that collides with an existing row) can't
+        // blow up the messages primary key.
+        id: nanoid(),
         conversationId: newId,
         role: String(mm.role),
         content: typeof mm.content === "string" ? mm.content : "",
@@ -251,6 +258,11 @@ export async function conversationRoutes(app: FastifyInstance) {
         createdAt: typeof mm.createdAt === "number" ? mm.createdAt : now,
       });
     }
+    const ALLOWED_EFFORT = new Set(["low", "medium", "high", "xhigh"]);
+    const safeEffort =
+      typeof src.reasoningEffort === "string" && ALLOWED_EFFORT.has(src.reasoningEffort)
+        ? src.reasoningEffort
+        : null;
     const row = {
       id: newId,
       title: String(src.title),
@@ -259,7 +271,7 @@ export async function conversationRoutes(app: FastifyInstance) {
       systemPrompt: typeof src.systemPrompt === "string" ? src.systemPrompt : null,
       temperature: typeof src.temperature === "number" ? src.temperature : 0.7,
       agentId: typeof src.agentId === "string" ? src.agentId : null,
-      reasoningEffort: typeof src.reasoningEffort === "string" ? src.reasoningEffort : null,
+      reasoningEffort: safeEffort,
       showThinking: typeof src.showThinking === "boolean" ? src.showThinking : null,
       createdAt: typeof src.createdAt === "number" ? src.createdAt : now,
       updatedAt: now,

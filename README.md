@@ -252,8 +252,9 @@ Layered on top of v4:
   the same payload so the export formats never go stale.
   - **Server** — `GET /api/conversations/:id/export` returns the
     canonical `ExportedConversation` (`schema: 1`); `POST
-    /api/conversations/import` mints a new conversation id and re-keys
-    message rows so the import never collides with existing data.
+    /api/conversations/import` mints a fresh id for both the
+    conversation row and every message row, and validates the role
+    whitelist, so the import never collides with existing data.
   - **Client** — `apps/web/src/lib/exporter.ts` renders the same
     payload to Markdown (text + parts, with reasoning / tool calls
     quoted) and to a PNG via a fixed-width canvas with line wrap. Both
