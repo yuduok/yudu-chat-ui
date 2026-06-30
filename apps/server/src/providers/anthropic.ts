@@ -1,12 +1,23 @@
-import type { ChatProvider, ProviderChatInput, ProviderChatChunk } from "./types.js";
+import type {
+  ChatProvider,
+  ProviderChatInput,
+  ProviderChatChunk,
+  ProviderMessage,
+} from "./types.js";
 
 // Anthropic Messages API with SSE streaming.
 // Docs: https://docs.anthropic.com/en/api/messages-streaming
+//
+// Tool support: forwards `tools` to upstream when supplied. We translate
+// ProviderContentPart tool_use -> {type:"tool_use",id,name,input} and
+// tool_result -> {type:"tool_result",tool_use_id,content,is_error}. Streamed
+// tool_use blocks are accumulated from content_block_start/delta/stop.
 export class AnthropicProvider implements ChatProvider {
   id = "anthropic";
   label = "Anthropic";
   defaultModels = ["claude-3-5-sonnet-latest", "claude-3-5-haiku-latest"];
   defaultBaseUrl = "https://api.anthropic.com";
+  supportsTools = true;
 
   async *chat(input: ProviderChatInput): AsyncIterable<ProviderChatChunk> {
     const baseUrl = (input.baseUrl ?? this.defaultBaseUrl!).replace(/\/$/, "");
@@ -17,36 +28,10 @@ export class AnthropicProvider implements ChatProvider {
     const messages: any[] = [];
     for (const m of input.messages) {
       if (m.role === "system") continue;
-      if (m.parts && m.parts.length) {
-        const blocks: any[] = [];
-        for (const p of m.parts) {
-          if (p.type === "text") blocks.push({ type: "text", text: p.text });
-          else if (p.type === "image_url") {
-            // data: URL or remote URL -> pass through
-            const url = p.image_url.url;
-            if (url.startsWith("data:")) {
-              const m = url.match(/^data:([^;]+);base64,(.*)$/);
-              if (m) {
-                blocks.push({
-                  type: "image",
-                  source: { type: "base64", media_type: m[1], data: m[2] },
-                });
-              }
-            } else {
-              blocks.push({
-                type: "image",
-                source: { type: "url", url },
-              });
-            }
-          }
-        }
-        messages.push({ role: m.role, content: blocks });
-      } else {
-        messages.push({ role: m.role, content: m.content });
-      }
+      messages.push(messageToAnthropic(m));
     }
 
-    const body = {
+    const body: Record<string, unknown> = {
       model: input.model,
       max_tokens: 4096,
       system: input.systemPrompt,
@@ -54,6 +39,22 @@ export class AnthropicProvider implements ChatProvider {
       messages,
       stream: true,
     };
+    if (input.tools && input.tools.length) {
+      body.tools = input.tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        input_schema: t.parameters,
+      }));
+      if (input.toolChoice === "auto") {
+        // Anthropic's default is auto; only force-disable when explicitly asked.
+        body.tool_choice = { type: "auto" };
+      } else if (input.toolChoice && typeof input.toolChoice === "object") {
+        body.tool_choice = { type: "tool", name: input.toolChoice.name };
+      } else if (input.toolChoice === "none") {
+        // "none" isn't supported by Anthropic — omit tools instead.
+        delete body.tools;
+      }
+    }
 
     const res = await fetch(url, {
       method: "POST",
@@ -76,6 +77,10 @@ export class AnthropicProvider implements ChatProvider {
     const decoder = new TextDecoder();
     let buffer = "";
 
+    // tool_use block accumulator keyed by index.
+    const blocks: Array<{ id: string; name: string; inputJson: string }> = [];
+    let stopSeen = false;
+
     try {
       while (true) {
         const { value, done } = await reader.read();
@@ -95,10 +100,46 @@ export class AnthropicProvider implements ChatProvider {
           if (!data) continue;
           try {
             const json = JSON.parse(data);
-            if (event === "content_block_delta") {
-              const text = json.delta?.text;
-              if (typeof text === "string" && text.length) yield { delta: text };
-            } else if (json.type === "message_delta" && json.usage) {
+            if (event === "content_block_start") {
+              const block = json.content_block;
+              if (block?.type === "tool_use") {
+                while (blocks.length <= (json.index ?? 0)) {
+                  blocks.push({ id: "", name: "", inputJson: "" });
+                }
+                const slot = blocks[json.index ?? 0];
+                slot.id = block.id ?? "";
+                slot.name = block.name ?? "";
+                slot.inputJson = "";
+              }
+            } else if (event === "content_block_delta") {
+              const delta = json.delta;
+              if (delta?.type === "input_json_delta" && typeof delta.partial_json === "string") {
+                const slot = blocks[json.index ?? blocks.length - 1];
+                if (slot) slot.inputJson += delta.partial_json;
+              } else if (typeof delta?.text === "string" && delta.text.length) {
+                yield { delta: delta.text };
+              }
+            } else if (event === "content_block_stop") {
+              const slot = blocks[json.index ?? blocks.length - 1];
+              if (slot && slot.id && slot.name) {
+                let parsed: Record<string, unknown> | string = slot.inputJson;
+                if (slot.inputJson) {
+                  try {
+                    parsed = JSON.parse(slot.inputJson);
+                  } catch {
+                    parsed = slot.inputJson;
+                  }
+                }
+                yield {
+                  delta: "",
+                  toolCall: {
+                    id: slot.id,
+                    name: slot.name,
+                    arguments: parsed,
+                  },
+                };
+              }
+            } else if (event === "message_delta" && json.usage) {
               yield {
                 delta: "",
                 usage: {
@@ -106,14 +147,83 @@ export class AnthropicProvider implements ChatProvider {
                   completionTokens: json.usage.output_tokens ?? 0,
                 },
               };
+            } else if (event === "message_stop") {
+              stopSeen = true;
+              return;
             }
           } catch {
-            // ignore
+            // ignore malformed
           }
         }
       }
     } finally {
       reader.releaseLock();
     }
+    if (!stopSeen) {
+      // No-op: stream just ended without a message_stop. Nothing else to do.
+    }
+  }
+}
+
+function messageToAnthropic(m: ProviderMessage): { role: string; content: unknown } {
+  const parts = m.parts;
+
+  // Mixed tool_use / tool_result / text parts -> one user or assistant turn.
+  if (parts && parts.length) {
+    const blocks: any[] = [];
+    for (const p of parts) {
+      if (p.type === "text") {
+        if (p.text) blocks.push({ type: "text", text: p.text });
+      } else if (p.type === "image_url") {
+        const url = p.image_url.url;
+        if (url.startsWith("data:")) {
+          const mm = url.match(/^data:([^;]+);base64,(.*)$/);
+          if (mm) {
+            blocks.push({
+              type: "image",
+              source: { type: "base64", media_type: mm[1], data: mm[2] },
+            });
+          }
+        } else {
+          blocks.push({ type: "image", source: { type: "url", url } });
+        }
+      } else if (p.type === "tool_use") {
+        blocks.push({
+          type: "tool_use",
+          id: p.id,
+          name: p.name,
+          input: p.input,
+        });
+      } else if (p.type === "tool_result") {
+        blocks.push({
+          type: "tool_result",
+          tool_use_id: p.toolUseId,
+          content: p.content,
+          is_error: !!p.isError,
+        });
+      }
+    }
+    if (blocks.length) return { role: m.role, content: blocks };
+  }
+
+  // toolCalls-only fallback (assistant message with tool_use but no parts).
+  if (m.toolCalls && m.toolCalls.length) {
+    const blocks = m.toolCalls.map((tc) => ({
+      type: "tool_use",
+      id: tc.id,
+      name: tc.name,
+      input: typeof tc.arguments === "string" ? safeParse(tc.arguments) : tc.arguments,
+    }));
+    return { role: m.role, content: blocks };
+  }
+
+  return { role: m.role, content: m.content };
+}
+
+function safeParse(s: string): unknown {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return {};
   }
 }

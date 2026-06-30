@@ -2,28 +2,66 @@ import { create } from "zustand";
 import type { ChatMessage, Conversation } from "@yudu/shared";
 import * as api from "@/lib/api";
 
+// ---------- Activity panel (tool calls + agent orchestration) ----------
+
+export interface ActiveToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown> | string;
+  status: "running" | "ok" | "error";
+  result?: string;
+  isError?: boolean;
+  agentId?: string;
+  startedAt: number;
+  finishedAt?: number;
+}
+
+export interface ActiveAgentEvent {
+  kind: "started" | "finished";
+  agentId: string;
+  label: string;
+  ts: number;
+}
+
 interface ChatState {
   conversations: Conversation[];
   activeId: string | null;
   messages: ChatMessage[];
   streaming: boolean;
-  // Per-conversation error to surface in the UI
   error: string | null;
+
+  // Tool + agent orchestration activity for the active turn. Reset on
+  // conversation switch and after each successful send.
+  activeToolCalls: ActiveToolCall[];
+  activeAgentEvents: ActiveAgentEvent[];
 
   // Actions
   loadConversations: () => Promise<void>;
-  createConversation: (init?: Partial<Pick<Conversation, "title" | "provider" | "model">>) => Promise<Conversation>;
+  createConversation: (
+    init?: Partial<Pick<Conversation, "title" | "provider" | "model" | "agentId">>,
+  ) => Promise<Conversation>;
   selectConversation: (id: string | null) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
   renameConversation: (id: string, title: string) => Promise<void>;
   updateConversationSettings: (
     id: string,
-    patch: Partial<Pick<Conversation, "provider" | "model" | "systemPrompt" | "temperature">>,
+    patch: Partial<
+      Pick<Conversation, "provider" | "model" | "systemPrompt" | "temperature" | "agentId">
+    >,
   ) => Promise<void>;
   deleteMessage: (id: string) => Promise<void>;
 
+  // Activity actions (mostly internal; the sendMessage loop uses them)
+  resetActivity: () => void;
+  pushToolCall: (call: { id: string; name: string; arguments: Record<string, unknown> | string }) => void;
+  resolveToolCall: (toolCallId: string, content: string, isError?: boolean, agentId?: string) => void;
+  pushAgentEvent: (ev: { kind: "started" | "finished"; agentId: string; label: string }) => void;
+
   // Streaming
-  sendMessage: (content: string, opts?: { regenerate?: boolean; editLastUser?: boolean }) => Promise<void>;
+  sendMessage: (
+    content: string,
+    opts?: { regenerate?: boolean; editLastUser?: boolean; useTools?: boolean },
+  ) => Promise<void>;
   stop: () => void;
 }
 
@@ -35,6 +73,8 @@ export const useChat = create<ChatState>((set, get) => ({
   messages: [],
   streaming: false,
   error: null,
+  activeToolCalls: [],
+  activeAgentEvents: [],
 
   async loadConversations() {
     const list = await api.listConversations();
@@ -46,14 +86,27 @@ export const useChat = create<ChatState>((set, get) => ({
       provider: init?.provider ?? "mock",
       model: init?.model ?? "mock-1",
       title: init?.title,
+      agentId: init?.agentId ?? null,
     });
-    set((s) => ({ conversations: [conv, ...s.conversations], activeId: conv.id, messages: [] }));
+    set((s) => ({
+      conversations: [conv, ...s.conversations],
+      activeId: conv.id,
+      messages: [],
+      activeToolCalls: [],
+      activeAgentEvents: [],
+    }));
     return conv;
   },
 
   async selectConversation(id) {
     if (get().streaming) get().stop();
-    set({ activeId: id, messages: [], error: null });
+    set({
+      activeId: id,
+      messages: [],
+      error: null,
+      activeToolCalls: [],
+      activeAgentEvents: [],
+    });
     if (!id) return;
     const detail = await api.getConversation(id);
     set({ messages: detail.messages });
@@ -89,6 +142,52 @@ export const useChat = create<ChatState>((set, get) => ({
     set((s) => ({ messages: s.messages.filter((m) => m.id !== id) }));
   },
 
+  resetActivity() {
+    set({ activeToolCalls: [], activeAgentEvents: [] });
+  },
+
+  pushToolCall(call) {
+    set((s) => {
+      // Avoid duplicates if a tool_call chunk is replayed.
+      if (s.activeToolCalls.some((c) => c.id === call.id)) return s;
+      return {
+        activeToolCalls: [
+          ...s.activeToolCalls,
+          {
+            id: call.id,
+            name: call.name,
+            arguments: call.arguments,
+            status: "running",
+            startedAt: Date.now(),
+          },
+        ],
+      };
+    });
+  },
+
+  resolveToolCall(toolCallId, content, isError, agentId) {
+    set((s) => ({
+      activeToolCalls: s.activeToolCalls.map((c) =>
+        c.id === toolCallId
+          ? {
+              ...c,
+              status: isError ? "error" : "ok",
+              result: content,
+              isError,
+              agentId: agentId ?? c.agentId,
+              finishedAt: Date.now(),
+            }
+          : c,
+      ),
+    }));
+  },
+
+  pushAgentEvent(ev) {
+    set((s) => ({
+      activeAgentEvents: [...s.activeAgentEvents, { ...ev, ts: Date.now() }],
+    }));
+  },
+
   stop() {
     currentAbort?.abort();
     currentAbort = null;
@@ -100,13 +199,12 @@ export const useChat = create<ChatState>((set, get) => ({
     if (!activeId) return;
     if (get().streaming) return;
 
-    set({ streaming: true, error: null });
+    set({ streaming: true, error: null, activeToolCalls: [], activeAgentEvents: [] });
 
     // Optimistically mutate local history so the UI updates immediately.
     let working: ChatMessage[] = messages;
 
     if (opts?.regenerate) {
-      // drop trailing assistant message(s) before re-requesting
       while (working.length && working[working.length - 1].role === "assistant") {
         working = working.slice(0, -1);
       }
@@ -136,7 +234,6 @@ export const useChat = create<ChatState>((set, get) => ({
         },
       ];
     }
-    // Append a placeholder assistant message
     const placeholderId = `local-assistant-${Date.now()}`;
     working = [
       ...working,
@@ -161,8 +258,14 @@ export const useChat = create<ChatState>((set, get) => ({
           content,
           regenerate: opts?.regenerate,
           editLastUser: opts?.editLastUser,
+          useTools: opts?.useTools,
         },
         ac.signal,
+        {
+          onToolCall: (call) => get().pushToolCall(call),
+          onToolResult: (r) => get().resolveToolCall(r.toolCallId, r.content, r.isError, r.agentId),
+          onAgentEvent: (e) => get().pushAgentEvent(e),
+        },
       )) {
         if (ev.type === "delta") {
           acc += ev.text;
@@ -196,7 +299,6 @@ export const useChat = create<ChatState>((set, get) => ({
         } else if (ev.type === "error") {
           set({ error: ev.message });
         } else if (ev.type === "done") {
-          // refresh the sidebar so titles/timestamps stay in sync
           void get().loadConversations();
         }
       }

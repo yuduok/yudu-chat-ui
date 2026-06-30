@@ -4,13 +4,16 @@ import { MessageBubble } from "@/components/message";
 import { Composer } from "@/components/composer";
 import { Sidebar } from "@/components/sidebar";
 import { SettingsDialog } from "@/components/settings-dialog";
+import { AgentMenu } from "@/components/agent-menu";
+import { ActivityDrawer } from "@/components/activity-drawer";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import * as api from "@/lib/api";
 import { useTheme } from "@/hooks/use-theme";
 import { useI18n, type Locale } from "@/i18n";
-import { Logo, Wordmark } from "@/components/logo";
-import { Moon, Sun, MonitorSmartphone, Languages } from "lucide-react";
+import { Logo } from "@/components/logo";
+import { Activity, Moon, Sun, MonitorSmartphone, Languages } from "lucide-react";
+import type { AgentProfile } from "@yudu/shared";
 
 export function ChatPage() {
   const { t, locale, setLocale } = useI18n();
@@ -20,12 +23,32 @@ export function ChatPage() {
   const error = useChat((s) => s.error);
   const convos = useChat((s) => s.conversations);
   const updateConv = useChat((s) => s.updateConversationSettings);
+  const activeToolCalls = useChat((s) => s.activeToolCalls);
+  const activeAgentEvents = useChat((s) => s.activeAgentEvents);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [providers, setProviders] = useState<{ id: string; label: string; models: string[] }[]>([]);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [providers, setProviders] = useState<api.ProviderModels[] | { id: string; label: string; models: string[] }[]>([]);
   const [modelList, setModelList] = useState<string[]>([]);
+  const [agents, setAgents] = useState<AgentProfile[]>([]);
   const { theme, setTheme } = useTheme();
 
   const active = convos.find((c) => c.id === activeId);
+
+  // Agents rarely change at runtime; cache once per page lifecycle.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listAgents()
+      .then((list) => {
+        if (!cancelled) setAgents(list);
+      })
+      .catch(() => {
+        // Non-fatal: agent menu + attribution just stay empty.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     void api.listProviders().then(setProviders);
@@ -40,9 +63,8 @@ export function ChatPage() {
     let cancelled = false;
     void api
       .getProviderModels(active.provider)
-      .then((res) => {
+      .then((res: api.ProviderModels) => {
         if (cancelled) return;
-        // If the conversation's saved model isn't in the list, keep it visible.
         const set = new Set(res.models);
         if (active.model && !set.has(active.model)) set.add(active.model);
         setModelList(Array.from(set));
@@ -63,6 +85,13 @@ export function ChatPage() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, streaming]);
 
+  const agentAttribution = active?.agentId
+    ? agents.find((a) => a.id === active.agentId)?.label ?? active.agentId
+    : null;
+
+  const activityCount =
+    activeToolCalls.length + activeAgentEvents.length;
+
   return (
     <div className="flex h-full">
       <Sidebar onOpenSettings={() => setSettingsOpen(true)} />
@@ -72,7 +101,16 @@ export function ChatPage() {
           <div className="flex min-w-0 items-center gap-3">
             {active ? (
               <>
-                <div className="truncate text-sm font-medium">{active.title}</div>
+                <div className="flex min-w-0 flex-col">
+                  <div className="truncate text-sm font-medium">{active.title}</div>
+                  {agentAttribution && (
+                    <div className="truncate text-[10px] text-muted-foreground">
+                      {t("chat.agentAttribution", { agent: agentAttribution })}
+                    </div>
+                  )}
+                </div>
+                <div className="hidden h-4 w-px bg-border sm:block" />
+                <AgentMenu />
                 <div className="hidden h-4 w-px bg-border sm:block" />
                 <div className="hidden items-center gap-2 sm:flex">
                   <Select
@@ -83,7 +121,7 @@ export function ChatPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {providers.map((p) => (
+                      {(providers as { id: string; label: string }[]).map((p) => (
                         <SelectItem key={p.id} value={p.id}>
                           {p.label}
                         </SelectItem>
@@ -119,6 +157,21 @@ export function ChatPage() {
             )}
           </div>
           <div className="flex items-center gap-1">
+            <Button
+              variant={activityCount > 0 ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setActivityOpen(true)}
+              title={t("agent.activity")}
+              aria-label={t("agent.activity")}
+              className="relative h-8 gap-1.5 text-xs"
+            >
+              <Activity className="h-3.5 w-3.5" />
+              {activityCount > 0 && (
+                <span className="rounded bg-primary px-1 text-[10px] text-primary-foreground">
+                  {activityCount}
+                </span>
+              )}
+            </Button>
             <Select value={locale} onValueChange={(v) => setLocale(v as Locale)}>
               <SelectTrigger className="h-8 w-[88px] text-xs" aria-label="Language">
                 <Languages className="mr-1 h-3.5 w-3.5" />
@@ -178,6 +231,7 @@ export function ChatPage() {
       </main>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <ActivityDrawer open={activityOpen} onOpenChange={setActivityOpen} />
     </div>
   );
 }

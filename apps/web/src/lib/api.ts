@@ -1,4 +1,5 @@
 import type {
+  AgentProfile,
   ChatMessage,
   Conversation,
   ConversationWithMessages,
@@ -21,6 +22,7 @@ export async function createConversation(input: {
   model?: string;
   systemPrompt?: string;
   temperature?: number;
+  agentId?: string | null;
 }): Promise<Conversation> {
   const r = await fetch(`${BASE}/conversations`, {
     method: "POST",
@@ -39,7 +41,9 @@ export async function getConversation(id: string): Promise<ConversationWithMessa
 
 export async function updateConversation(
   id: string,
-  patch: Partial<Pick<Conversation, "title" | "provider" | "model" | "systemPrompt" | "temperature">>,
+  patch: Partial<
+    Pick<Conversation, "title" | "provider" | "model" | "systemPrompt" | "temperature" | "agentId">
+  >,
 ): Promise<Conversation> {
   const r = await fetch(`${BASE}/conversations/${id}`, {
     method: "PATCH",
@@ -64,6 +68,12 @@ export async function listProviders(): Promise<ProviderConfig[]> {
   return r.json();
 }
 
+export async function listAgents(): Promise<AgentProfile[]> {
+  const r = await fetch(`${BASE}/agents`);
+  if (!r.ok) throw new Error("listAgents failed");
+  return r.json();
+}
+
 export interface ProviderModels {
   provider: string;
   baseUrl: string | null;
@@ -74,7 +84,10 @@ export interface ProviderModels {
   error?: string;
 }
 
-export async function getProviderModels(id: string, opts: { remote?: boolean } = {}): Promise<ProviderModels> {
+export async function getProviderModels(
+  id: string,
+  opts: { remote?: boolean } = {},
+): Promise<ProviderModels> {
   const qs = opts.remote ? "?remote=1" : "";
   const r = await fetch(`${BASE}/providers/${encodeURIComponent(id)}/models${qs}`);
   if (!r.ok) throw new Error("getProviderModels failed");
@@ -103,9 +116,29 @@ export async function saveSettings(input: {
   });
 }
 
+export interface StreamCallbacks {
+  onToolCall?: (call: {
+    id: string;
+    name: string;
+    arguments: Record<string, unknown> | string;
+  }) => void;
+  onToolResult?: (result: {
+    toolCallId: string;
+    agentId?: string;
+    content: string;
+    isError?: boolean;
+  }) => void;
+  onAgentEvent?: (event: {
+    kind: "started" | "finished";
+    agentId: string;
+    label: string;
+  }) => void;
+}
+
 export async function* streamChat(
   req: ChatRequest,
   signal: AbortSignal,
+  callbacks: StreamCallbacks = {},
 ): AsyncGenerator<StreamEvent, void, void> {
   const r = await fetch(`${BASE}/chat`, {
     method: "POST",
@@ -135,10 +168,16 @@ export async function* streamChat(
         if (!payload) continue;
         try {
           const ev = JSON.parse(payload) as StreamEvent;
+          // Dispatch side-channel callbacks alongside the streamed event so
+          // callers can update tool/agent UI without re-matching types.
+          if (ev.type === "tool_call") callbacks.onToolCall?.(ev.call);
+          else if (ev.type === "tool_result") callbacks.onToolResult?.(ev);
+          else if (ev.type === "agent_started") callbacks.onAgentEvent?.({ kind: "started", ...ev });
+          else if (ev.type === "agent_finished") callbacks.onAgentEvent?.({ kind: "finished", ...ev });
           yield ev;
           if (ev.type === "done" || ev.type === "error") return;
         } catch {
-          // ignore
+          // ignore malformed frames
         }
       }
     }

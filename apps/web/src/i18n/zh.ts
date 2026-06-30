@@ -16,6 +16,7 @@ export const zh: Record<TranslationKey, string> = {
   "composer.send": "发送",
   "composer.stop": "停止",
   "composer.disclaimer": "AI 可能会出错，请核实重要信息。",
+  "composer.runWithTools": "使用工具",
 
   // Message
   "message.copy": "复制",
@@ -24,6 +25,23 @@ export const zh: Record<TranslationKey, string> = {
   "message.edit": "编辑并重新提交",
   "message.regenerate": "重新生成",
   "message.delete": "删除",
+
+  // Tools
+  "tool.call": "工具调用",
+  "tool.result": "工具结果",
+  "tool.error": "工具错误",
+
+  // Agents
+  "agent.menu": "智能体",
+  "agent.menu.none": "无智能体",
+  "agent.menu.noneHint": "普通对话，不使用编排与工具白名单",
+  "agent.activity": "活动面板",
+  "agent.events": "智能体",
+  "agent.tools": "工具调用",
+  "agent.started": "开始",
+  "agent.finished": "完成",
+  "agent.empty": "运行时，工具调用与智能体事件会出现在这里。",
+  "chat.agentAttribution": "由 {agent} 生成",
 
   // Settings dialog
   "settings.title": "设置",

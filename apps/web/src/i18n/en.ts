@@ -14,6 +14,7 @@ export const en = {
   "composer.send": "Send",
   "composer.stop": "Stop",
   "composer.disclaimer": "AI can make mistakes. Verify important info.",
+  "composer.runWithTools": "Run with tools",
 
   // Message
   "message.copy": "Copy",
@@ -22,6 +23,23 @@ export const en = {
   "message.edit": "Edit & resubmit",
   "message.regenerate": "Regenerate",
   "message.delete": "Delete",
+
+  // Tools
+  "tool.call": "Tool call",
+  "tool.result": "Tool result",
+  "tool.error": "Tool error",
+
+  // Agents
+  "agent.menu": "Agent",
+  "agent.menu.none": "No agent",
+  "agent.menu.noneHint": "Plain chat, no orchestration or tool allowlist",
+  "agent.activity": "Activity",
+  "agent.events": "Agents",
+  "agent.tools": "Tool calls",
+  "agent.started": "started",
+  "agent.finished": "finished",
+  "agent.empty": "Tool calls and agent events will appear here while a turn is running.",
+  "chat.agentAttribution": "by {agent}",
 
   // Settings dialog
   "settings.title": "Settings",

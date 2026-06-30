@@ -38,6 +38,11 @@ const providers: Record<string, ChatProvider> = {
   mock,
 };
 
+// Surface supportsTools uniformly so the API can advertise it.
+for (const p of Object.values(providers)) {
+  if (p.supportsTools === undefined) p.supportsTools = false;
+}
+
 export function getProvider(id: string): ChatProvider | undefined {
   return providers[id];
 }

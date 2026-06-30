@@ -14,7 +14,20 @@ sqlite.pragma("journal_mode = WAL");
 export const db = drizzle(sqlite, { schema });
 export { schema };
 
-// Bootstrap tables (small project, no migrations needed yet)
+// Bootstrap tables (small project, no migrations needed yet).
+// The ALTER statements are idempotent: SQLite returns an error if the
+// column already exists, which we swallow.
+function safeAlter(sql: string) {
+  try {
+    sqlite.exec(sql);
+  } catch (err: any) {
+    const msg = String(err?.message ?? err);
+    if (!/duplicate column name/i.test(msg)) {
+      console.warn("[db] migration step failed:", msg);
+    }
+  }
+}
+
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
@@ -39,3 +52,7 @@ sqlite.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
 `);
+
+// v3 columns
+safeAlter("ALTER TABLE conversations ADD COLUMN agent_id TEXT");
+safeAlter("ALTER TABLE messages ADD COLUMN tool_call_ids TEXT");
