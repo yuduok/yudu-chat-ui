@@ -52,9 +52,13 @@ export class AnthropicProvider implements ChatProvider {
     }
 
     const thinkingBudget = thinkingBudgetFor(input.reasoningEffort);
+    // Lift max_tokens to accommodate the thinking budget so high/xhigh
+    // don't get truncated mid-stream. We pick the larger of a 4k text
+    // budget and 2x the thinking budget so the visible reply has room.
+    const maxTokens = thinkingBudget ? Math.max(4096, thinkingBudget * 2) : 4096;
     const body: Record<string, unknown> = {
       model: input.model,
-      max_tokens: 4096,
+      max_tokens: maxTokens,
       system: input.systemPrompt,
       temperature: input.temperature ?? 0.7,
       messages,
