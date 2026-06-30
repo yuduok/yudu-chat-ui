@@ -83,6 +83,12 @@ export const en = {
   "chat.empty.cta": "New chat",
   "chat.theme.toggle": "Theme",
   "chat.appName": "Yudu Chat",
+  // Models picker (fetch result)
+  "settings.fetchedModels": "Fetched models",
+  "settings.fetchedModelsAdd": "Add ({count})",
+  "settings.fetchedModelsAlready": "Added",
+  "settings.fetchedModelsAdded": "Added {count} model(s)",
+  "settings.fetchedCount": "{count} models loaded",
 } as const;
 
 export type TranslationKey = keyof typeof en;
