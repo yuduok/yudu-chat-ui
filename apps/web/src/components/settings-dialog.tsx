@@ -142,12 +142,12 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col gap-0 p-0">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{t("settings.title")}</DialogTitle>
           <DialogDescription>{t("settings.description")}</DialogDescription>
         </DialogHeader>
-
         <Tabs defaultValue="providers">
           <TabsList>
             <TabsTrigger value="providers">{t("settings.tab.providers")}</TabsTrigger>
@@ -251,7 +251,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                           {t("settings.fetchedModelsAdd", { count: activePicked.length })}
                         </Button>
                       </div>
-                      <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+                      <div className="max-h-40 space-y-1 overflow-y-auto pr-1">
                         {activeFetched.models.map((m) => {
                           const already = (activeDraft.manualModels ?? []).includes(m);
                           return (
@@ -273,23 +273,6 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                             </label>
                           );
                         })}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {/* Built-in defaults (shown when no fetch result yet, or
-                      even after — useful as a reference of what ships OOTB). */}
-                  {activeProvider.models.length ? (
-                    <div className="space-y-1.5">
-                      <div className="text-[11px] font-medium text-muted-foreground">
-                        {t("settings.source.fallback")}
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {activeProvider.models.map((m) => (
-                          <code key={m} className="rounded bg-muted px-1.5 py-0.5 text-[11px]">
-                            {m}
-                          </code>
-                        ))}
                       </div>
                     </div>
                   ) : null}
@@ -381,6 +364,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             </div>
           </TabsContent>
         </Tabs>
+        </div>
 
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
