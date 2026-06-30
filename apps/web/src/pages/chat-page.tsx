@@ -2,25 +2,27 @@ import { useEffect, useRef, useState } from "react";
 import { useChat } from "@/store/chat";
 import { MessageBubble } from "@/components/message";
 import { Composer } from "@/components/composer";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sidebar } from "@/components/sidebar";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import * as api from "@/lib/api";
 import { useTheme } from "@/hooks/use-theme";
-import { Moon, Sun, MonitorSmartphone } from "lucide-react";
+import { useI18n, type Locale } from "@/i18n";
+import { Logo, Wordmark } from "@/components/logo";
+import { Moon, Sun, MonitorSmartphone, Languages } from "lucide-react";
 
 export function ChatPage() {
+  const { t, locale, setLocale } = useI18n();
   const messages = useChat((s) => s.messages);
   const activeId = useChat((s) => s.activeId);
   const streaming = useChat((s) => s.streaming);
   const error = useChat((s) => s.error);
   const convos = useChat((s) => s.conversations);
   const updateConv = useChat((s) => s.updateConversationSettings);
-  const select = useChat((s) => s.selectConversation);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [providers, setProviders] = useState<{ id: string; label: string; models: string[] }[]>([]);
+  const [modelList, setModelList] = useState<string[]>([]);
   const { theme, setTheme } = useTheme();
 
   const active = convos.find((c) => c.id === activeId);
@@ -28,6 +30,31 @@ export function ChatPage() {
   useEffect(() => {
     void api.listProviders().then(setProviders);
   }, []);
+
+  // Whenever the active provider changes, refresh the model list (defaults + manual).
+  useEffect(() => {
+    if (!active) {
+      setModelList([]);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .getProviderModels(active.provider)
+      .then((res) => {
+        if (cancelled) return;
+        // If the conversation's saved model isn't in the list, keep it visible.
+        const set = new Set(res.models);
+        if (active.model && !set.has(active.model)) set.add(active.model);
+        setModelList(Array.from(set));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setModelList([active.model]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [active?.provider, active?.model, active]);
 
   // Autoscroll to bottom when new content arrives
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -67,36 +94,58 @@ export function ChatPage() {
                     value={active.model}
                     onValueChange={(v) => void updateConv(active.id, { model: v })}
                   >
-                    <SelectTrigger className="h-8 w-[160px] text-xs">
+                    <SelectTrigger className="h-8 w-[200px] text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {(providers.find((p) => p.id === active.provider)?.models ?? [active.model]).map(
-                        (m) => (
+                      {modelList.length === 0 ? (
+                        <SelectItem value={active.model}>{active.model}</SelectItem>
+                      ) : (
+                        modelList.map((m) => (
                           <SelectItem key={m} value={m}>
                             {m}
                           </SelectItem>
-                        ),
+                        ))
                       )}
                     </SelectContent>
                   </Select>
                 </div>
               </>
             ) : (
-              <div className="text-sm text-muted-foreground">No conversation selected</div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Logo size={18} />
+                <span>{t("chat.noConversation")}</span>
+              </div>
             )}
           </div>
           <div className="flex items-center gap-1">
+            <Select value={locale} onValueChange={(v) => setLocale(v as Locale)}>
+              <SelectTrigger className="h-8 w-[88px] text-xs" aria-label="Language">
+                <Languages className="mr-1 h-3.5 w-3.5" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="en">English</SelectItem>
+                <SelectItem value="zh">中文</SelectItem>
+              </SelectContent>
+            </Select>
             <Button
               variant="ghost"
               size="icon"
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              title={`Theme: ${theme}`}
+              title={t("chat.theme.toggle")}
+              aria-label={t("chat.theme.toggle")}
             >
-              {theme === "dark" ? <Sun className="h-4 w-4" /> : theme === "light" ? <Moon className="h-4 w-4" /> : <MonitorSmartphone className="h-4 w-4" />}
+              {theme === "dark" ? (
+                <Sun className="h-4 w-4" />
+              ) : theme === "light" ? (
+                <Moon className="h-4 w-4" />
+              ) : (
+                <MonitorSmartphone className="h-4 w-4" />
+              )}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}>
-              Settings
+              {t("sidebar.settings")}
             </Button>
           </div>
         </header>
@@ -109,15 +158,11 @@ export function ChatPage() {
             <div className="mx-auto max-w-3xl">
               {messages.length === 0 ? (
                 <div className="flex h-full items-center justify-center px-6 py-24 text-center text-sm text-muted-foreground">
-                  Send a message to start the conversation.
+                  {t("chat.startPrompt")}
                 </div>
               ) : (
                 messages.map((m, i) => (
-                  <MessageBubble
-                    key={m.id}
-                    msg={m}
-                    isLast={i === messages.length - 1}
-                  />
+                  <MessageBubble key={m.id} msg={m} isLast={i === messages.length - 1} />
                 ))
               )}
               {error && (
@@ -138,23 +183,27 @@ export function ChatPage() {
 }
 
 function EmptyState() {
+  const { t } = useI18n();
   const create = useChat((s) => s.createConversation);
   const select = useChat((s) => s.selectConversation);
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-      <div className="rounded-full border bg-card px-3 py-1 text-[11px] text-muted-foreground">Yudu Chat</div>
-      <h1 className="text-2xl font-semibold tracking-tight">Your own AI workspace</h1>
-      <p className="max-w-md text-sm text-muted-foreground">
-        Stream responses, switch models on the fly, and keep every conversation searchable. Start a new
-        chat to begin.
-      </p>
+      <div className="flex items-center gap-2 rounded-full border bg-card px-3 py-1 text-[11px] text-muted-foreground">
+        <Logo size={14} />
+        <span>{t("chat.appName")}</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <Logo size={40} />
+        <h1 className="text-2xl font-semibold tracking-tight">{t("chat.empty.heading")}</h1>
+      </div>
+      <p className="max-w-md text-sm text-muted-foreground">{t("chat.empty.subtitle")}</p>
       <Button
         onClick={async () => {
           const c = await create();
           await select(c.id);
         }}
       >
-        New chat
+        {t("chat.empty.cta")}
       </Button>
     </div>
   );

@@ -3,8 +3,10 @@ import { Send, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useChat } from "@/store/chat";
+import { useI18n } from "@/i18n";
 
 export function Composer() {
+  const { t } = useI18n();
   const send = useChat((s) => s.sendMessage);
   const stop = useChat((s) => s.stop);
   const streaming = useChat((s) => s.streaming);
@@ -40,22 +42,28 @@ export function Composer() {
               submit();
             }
           }}
-          placeholder="Send a message… (Enter to send, Shift+Enter for newline)"
+          placeholder={t("composer.placeholder")}
           className="min-h-[44px] resize-none"
           rows={1}
         />
         {streaming ? (
-          <Button onClick={stop} variant="destructive" size="icon" title="Stop">
+          <Button onClick={stop} variant="destructive" size="icon" title={t("composer.stop")} aria-label={t("composer.stop")}>
             <Square className="h-4 w-4" />
           </Button>
         ) : (
-          <Button onClick={submit} size="icon" disabled={!value.trim()} title="Send">
+          <Button
+            onClick={submit}
+            size="icon"
+            disabled={!value.trim()}
+            title={t("composer.send")}
+            aria-label={t("composer.send")}
+          >
             <Send className="h-4 w-4" />
           </Button>
         )}
       </div>
       <p className="mx-auto mt-1 max-w-3xl text-[11px] text-muted-foreground">
-        AI can make mistakes. Verify important info.
+        {t("composer.disclaimer")}
       </p>
     </div>
   );

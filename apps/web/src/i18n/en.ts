@@ -1,0 +1,70 @@
+export const en = {
+  // Sidebar
+  "sidebar.newChat": "New chat",
+  "sidebar.history": "History",
+  "sidebar.emptyHistory": "No conversations yet. Start a new chat.",
+  "sidebar.rename": "Rename",
+  "sidebar.delete": "Delete",
+  "sidebar.settings": "Settings",
+  "sidebar.collapse": "Collapse sidebar",
+  "sidebar.expand": "Expand sidebar",
+
+  // Composer
+  "composer.placeholder": "Send a message… (Enter to send, Shift+Enter for newline)",
+  "composer.send": "Send",
+  "composer.stop": "Stop",
+  "composer.disclaimer": "AI can make mistakes. Verify important info.",
+
+  // Message
+  "message.copy": "Copy",
+  "message.cancel": "Cancel",
+  "message.copied": "Copied",
+  "message.edit": "Edit & resubmit",
+  "message.regenerate": "Regenerate",
+  "message.delete": "Delete",
+
+  // Settings dialog
+  "settings.title": "Settings",
+  "settings.description":
+    "Configure model providers and UI preferences. Keys are stored locally on the server.",
+  "settings.tab.providers": "Providers",
+  "settings.tab.appearance": "Appearance",
+  "settings.provider": "Provider",
+  "settings.apiKey": "API Key",
+  "settings.apiKey.placeholder": "sk-...",
+  "settings.apiKey.hint":
+    'Leave blank to keep existing key. The mock provider does not require a key.',
+  "settings.baseUrl": "Base URL",
+  "settings.models": "Models",
+  "settings.appearance.dark": "Dark mode",
+  "settings.appearance.darkHint": 'Follow system if "Theme" is set to System.',
+  "settings.appearance.theme": "Theme",
+  "settings.appearance.theme.system": "System",
+  "settings.appearance.theme.light": "Light",
+  "settings.appearance.theme.dark": "Dark",
+  "settings.cancel": "Cancel",
+  "settings.save": "Save",
+  "settings.saved": "Settings saved",
+  "settings.fetchModels": "Fetch models",
+  "settings.fetching": "Fetching…",
+  "settings.fetchFailed": "Failed to fetch models",
+  "settings.manualModel.placeholder": "Add a model ID",
+  "settings.manualModel.add": "Add",
+  "settings.manualModel.remove": "Remove",
+  "settings.manualModels": "Manual models",
+  "settings.source.fallback": "Default models",
+  "settings.source.manual": "Manual",
+  "settings.source.remote": "From server",
+
+  // Chat page
+  "chat.noConversation": "No conversation selected",
+  "chat.startPrompt": "Send a message to start the conversation.",
+  "chat.empty.heading": "Your own AI workspace",
+  "chat.empty.subtitle":
+    "Stream responses, switch models on the fly, and keep every conversation searchable. Start a new chat to begin.",
+  "chat.empty.cta": "New chat",
+  "chat.theme.toggle": "Theme",
+  "chat.appName": "Yudu Chat",
+} as const;
+
+export type TranslationKey = keyof typeof en;

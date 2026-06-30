@@ -5,7 +5,6 @@ import type {
   ProviderConfig,
   StreamEvent,
   ChatRequest,
-  ContentPart,
 } from "@yudu/shared";
 
 const BASE = "/api";
@@ -65,8 +64,25 @@ export async function listProviders(): Promise<ProviderConfig[]> {
   return r.json();
 }
 
+export interface ProviderModels {
+  provider: string;
+  baseUrl: string | null;
+  defaults: string[];
+  manual: string[];
+  models: string[];
+  source: "remote" | "fallback";
+  error?: string;
+}
+
+export async function getProviderModels(id: string, opts: { remote?: boolean } = {}): Promise<ProviderModels> {
+  const qs = opts.remote ? "?remote=1" : "";
+  const r = await fetch(`${BASE}/providers/${encodeURIComponent(id)}/models${qs}`);
+  if (!r.ok) throw new Error("getProviderModels failed");
+  return r.json();
+}
+
 export interface Settings {
-  providers: Record<string, { apiKeyMasked?: string; baseUrl?: string }>;
+  providers: Record<string, { apiKeyMasked?: string; baseUrl?: string; manualModels: string[] }>;
   ui: { theme: "light" | "dark" | "system" };
 }
 
@@ -77,7 +93,7 @@ export async function getSettings(): Promise<Settings> {
 }
 
 export async function saveSettings(input: {
-  providers: Record<string, { apiKey?: string; baseUrl?: string }>;
+  providers: Record<string, { apiKey?: string; baseUrl?: string; manualModels?: string[] }>;
   ui?: { theme?: "light" | "dark" | "system" };
 }): Promise<void> {
   await fetch(`${BASE}/settings`, {
@@ -87,7 +103,6 @@ export async function saveSettings(input: {
   });
 }
 
-// Stream a chat completion. Yields events; resolves when stream is done.
 export async function* streamChat(
   req: ChatRequest,
   signal: AbortSignal,
@@ -130,4 +145,4 @@ export async function* streamChat(
   }
 }
 
-export type { ChatMessage, ContentPart };
+export type { ChatMessage };
