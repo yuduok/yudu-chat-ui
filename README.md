@@ -73,6 +73,18 @@ new providers by registering a `ChatProvider` in
 - Light / dark / system theme
 - i18n (English / 中文), auto-detected from `navigator.language`
 - Provider + base URL settings persisted to `apps/server/data/settings.json`
+- **Reasoning depth (low / medium / high / xhigh)** — per-conversation selector
+  in the header. The server forwards the depth to the provider as
+  `reasoning_effort` (OpenAI-compatible) or maps it onto a
+  `thinking.budget_tokens` block (Anthropic). The mock provider emits a
+  synthetic trace whose length scales with depth so the UI is exercisable
+  without a real key.
+- **Show thinking (default on)** — collapsible reasoning-trace block
+  rendered above each assistant message when the conversation's
+  `showThinking` flag is true. Reasoning deltas stream over SSE as
+  `reasoning_delta` events, are persisted into a leading `reasoning`
+  content part on the assistant message, and the SSE channel is the only
+  thing gated by the toggle — flipping the UI off doesn't lose history.
 
 ## Built-in tools
 
@@ -168,6 +180,57 @@ orchestrator plus matching UI.
   - `chat-page.tsx` — adds the Activity button with badge, and a
     "by &lt;agent&gt;" attribution chip under the conversation title.
 
+## v4 highlights (reasoning depth + thinking trace)
+
+Adds two related capabilities on top of v3:
+
+- **Per-conversation reasoning depth** — `Conversation.reasoningEffort` is
+  persisted to SQLite; the `EffortMenu` dropdown in the header writes it
+  via `PATCH /api/conversations/:id`. Resolution order is per-turn
+  override (`ChatRequest.reasoningEffort`) > `AgentProfile.reasoningEffort`
+  > conversation setting > unset. Each provider maps the depth onto its
+  native wire shape:
+  - **OpenAI-compatible** — forwards `reasoning_effort` in the request
+    body and captures `delta.reasoning_content` (DeepSeek),
+    `delta.reasoning` (OpenAI o*/gpt-5), or `delta.reasoning_details[]`.
+  - **Anthropic** — emits a `thinking: { type: "enabled",
+    budget_tokens: <1024|4096|16384|32768> }` block, drops `temperature`
+    when thinking is enabled (Anthropic requires it), and lifts
+    `max_tokens` to `max(4096, budget*2)` so high/xhigh don't truncate.
+    Captures `thinking_delta` events as reasoning deltas.
+  - **Mock** — always emits a synthetic `reasoningDelta` scaled to depth
+    so the UI path is testable without a real API key.
+- **Show thinking trace** — a per-conversation `showThinking` flag
+  (default true) controls a Composer switch and a header icon toggle.
+  Reasoning deltas are accumulated across rounds, persisted into a
+  leading `reasoning` content part on the assistant message, and only
+  forwarded on the SSE channel when `showThinking` is true — so the
+  toggle is presentation-only and doesn't lose history.
+- **Web UI** —
+  - `components/effort-menu.tsx` — header dropdown with five choices
+    (Default / Low / Medium / High / X-High); `updateConversationSettings`
+    patches the active conversation.
+  - `components/composer.tsx` — `Show thinking` switch next to `Run with
+    tools`; submit forwards `reasoningEffort` + `showThinking`.
+  - `components/message.tsx` — `ReasoningBlock` renders any persisted
+    reasoning parts as a collapsible `<details>` (Brain icon + chevron)
+    above the assistant text. Honours the conversation's `showThinking`
+    flag and respects React's rules of hooks.
+  - `pages/chat-page.tsx` — mounts `EffortMenu` plus an icon toggle that
+    flips `showThinking` from the header.
+  - `store/chat.ts` — `sendMessage` accepts the new opts; live
+    `reasoning_delta` events stage a streaming `reasoning` part on the
+    placeholder so the trace is visible while the model is still
+    thinking.
+- **Persistence + migration** — `conversations.reasoning_effort` and
+  `conversations.show_thinking` columns are added via idempotent
+  `ALTER TABLE` on boot. Existing rows default to NULL, which the UI
+  treats as "Default depth + show thinking on".
+- **Bug fix bundled** — pre-existing bug where plain text-only replies
+  left the assistant placeholder row empty is fixed: the new
+  final-turn persist path emits `usage` / `message` / `agent_finished`
+  / `done` and writes content even without tool calls.
+
 ## Endpoints
 
 - `GET /api/health`
@@ -178,7 +241,11 @@ orchestrator plus matching UI.
 - `GET /api/conversations/:id`, `PATCH /api/conversations/:id` (accepts `agentId`),
   `DELETE /api/conversations/:id`
 - `DELETE /api/conversations/:id/messages/:messageId`
-- `POST /api/chat` (SSE) — accepts `useTools?: boolean`; emits `delta`,
-  `tool_call`, `tool_result`, `agent_started`, `agent_finished`, `usage`,
-  `message`, `done`, `error`
+- `POST /api/chat` (SSE) — accepts `useTools?: boolean`,
+  `reasoningEffort?: "low" | "medium" | "high" | "xhigh"`,
+  `showThinking?: boolean`. Emits `delta`, `reasoning_delta`,
+  `tool_call`, `tool_result`, `agent_started`, `agent_finished`,
+  `usage`, `message`, `done`, `error`.
+- `POST /api/conversations` / `PATCH /api/conversations/:id` — accept
+  `reasoningEffort` and `showThinking` in addition to v3 fields.
 - `GET /api/settings`, `PUT /api/settings`
