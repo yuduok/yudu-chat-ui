@@ -111,6 +111,8 @@ export const zh: Record<TranslationKey, string> = {
   "export.json": "导出为 JSON",
   "export.md": "导出为 Markdown",
   "export.png": "导出为 PNG",
+  "export.menu": "导出",
+  "export.menuLabel": "导出对话",
 
   // Usage report (Activity drawer tab)
   "agent.activityTab": "活动",

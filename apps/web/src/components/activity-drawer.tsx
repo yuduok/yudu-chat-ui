@@ -6,6 +6,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useChat } from "@/store/chat";
 import { useI18n } from "@/i18n";
 import { ToolCallRow } from "@/components/message";
+import { UsageRingChart, bucketsToSlices, type UsageRingSlice } from "@/components/usage-ring-chart";
+import { UsageLegendChart } from "@/components/usage-legend-chart";
 import * as api from "@/lib/api";
 import type { UsageReport } from "@yudu/shared";
 import { cn } from "@/lib/utils";
@@ -66,6 +68,18 @@ export function ActivityDrawer({ open, onOpenChange }: { open: boolean; onOpenCh
       messageCount: usage.total.messageCount,
     };
   }, [usage]);
+
+  // Convert the API buckets into the slice shape the ring chart
+  // expects. Memoizing keeps unrelated re-renders (tab clicks, tool
+  // call streaming) from re-walking these arrays.
+  const providerSlices = useMemo(
+    () => bucketsToSlices(usage ? usage.byProvider : []),
+    [usage],
+  );
+  const modelSlices = useMemo(
+    () => bucketsToSlices(usage ? usage.byModel : [], { sublabelFromModel: true }),
+    [usage],
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -214,73 +228,37 @@ export function ActivityDrawer({ open, onOpenChange }: { open: boolean; onOpenCh
                 </section>
               )}
 
-              {usage && usage.byProvider.length > 0 && (
+              {providerSlices.length > 0 && (
                 <section className="space-y-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     {t("usage.byProvider")}
                   </h3>
-                  <div className="overflow-hidden rounded-md border">
-                    <table className="w-full text-xs">
-                      <thead className="bg-muted/50 text-muted-foreground">
-                        <tr>
-                          <th className="px-3 py-1.5 text-left font-medium">{t("usage.provider")}</th>
-                          <th className="px-3 py-1.5 text-right font-medium">{t("usage.prompt")}</th>
-                          <th className="px-3 py-1.5 text-right font-medium">{t("usage.completion")}</th>
-                          <th className="px-3 py-1.5 text-right font-medium">{t("usage.totalTokens")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {usage.byProvider.map((b: UsageReport["byProvider"][number]) => (
-                          <tr key={b.provider} className="border-t">
-                            <td className="px-3 py-1.5 font-medium">{b.provider}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums">{formatTokens(b.promptTokens)}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums">{formatTokens(b.completionTokens)}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums">{formatTokens(b.totalTokens)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <UsageLegendChart
+                    slices={providerSlices}
+                    totalLabel={t("usage.total")}
+                    totalValue={formatTokens(usage ? usage.total.totalTokens : 0)}
+                    emptyLabel={t("usage.empty")}
+                    tokensLabelPrompt={t("usage.prompt")}
+                    tokensLabelCompletion={t("usage.completion")}
+                    formatTokens={formatTokens}
+                  />
                 </section>
               )}
-
-              {usage && usage.byModel.length > 0 && (
+              {modelSlices.length > 0 && (
                 <section className="space-y-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     {t("usage.byModel")}
                   </h3>
-                  <div className="overflow-hidden rounded-md border">
-                    <table className="w-full text-xs">
-                      <thead className="bg-muted/50 text-muted-foreground">
-                        <tr>
-                          <th className="px-3 py-1.5 text-left font-medium">{t("usage.model")}</th>
-                          <th className="px-3 py-1.5 text-right font-medium">{t("usage.prompt")}</th>
-                          <th className="px-3 py-1.5 text-right font-medium">{t("usage.completion")}</th>
-                          <th className="px-3 py-1.5 text-right font-medium">{t("usage.totalTokens")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {usage.byModel.map((b: UsageReport["byModel"][number]) => (
-                          <tr key={`${b.provider}/${b.model}`} className="border-t">
-                            <td className="px-3 py-1.5">
-                              <div className="font-medium">{b.model}</div>
-                              <div className="text-[10px] text-muted-foreground">{b.provider}</div>
-                            </td>
-                            <td className="px-3 py-1.5 text-right tabular-nums">{formatTokens(b.promptTokens)}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums">{formatTokens(b.completionTokens)}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums">{formatTokens(b.totalTokens)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <UsageLegendChart
+                    slices={modelSlices}
+                    totalLabel={t("usage.model")}
+                    totalValue={formatTokens(usage ? usage.total.totalTokens : 0)}
+                    emptyLabel={t("usage.empty")}
+                    tokensLabelPrompt={t("usage.prompt")}
+                    tokensLabelCompletion={t("usage.completion")}
+                    formatTokens={formatTokens}
+                  />
                 </section>
-              )}
-
-              {usage && usage.byProvider.length === 0 && (
-                <p className="rounded-md border border-dashed bg-muted/30 px-3 py-4 text-center text-[11px] text-muted-foreground">
-                  {t("usage.empty")}
-                </p>
               )}
             </div>
           </TabsContent>

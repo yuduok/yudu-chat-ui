@@ -111,6 +111,8 @@ export const en = {
   "export.json": "Export as JSON",
   "export.md": "Export as Markdown",
   "export.png": "Export as PNG",
+  "export.menu": "Export",
+  "export.menuLabel": "Export conversation",
 
   // Usage report (Activity drawer tab)
   "agent.activityTab": "Activity",
