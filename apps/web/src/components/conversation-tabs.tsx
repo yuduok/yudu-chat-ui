@@ -2,7 +2,13 @@ import { useEffect, useMemo, useRef } from "react";
 import { useChat } from "@/store/chat";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
-import { X } from "lucide-react";
+import { ChevronDown, Download, FileImage, FileJson, FileText, X } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import * as api from "@/lib/api";
 import { exportToMarkdown, exportToPng, downloadBlob, safeFilename } from "@/lib/exporter";
 
@@ -17,6 +23,11 @@ import { exportToMarkdown, exportToPng, downloadBlob, safeFilename } from "@/lib
  * underlying conversation is **not** deleted from the DB and stays
  * available in the sidebar. To actually delete a conversation, use
  * the sidebar's delete menu.
+ *
+ * The export affordance for the active tab is a single dropdown
+ * menu (PNG / MD / JSON) so the header stays compact. All three
+ * formats are derived client-side from the same JSON payload, so
+ * keeping them in one place avoids the export shapes drifting apart.
  */
 export function ConversationTabs() {
   const { t } = useI18n();
@@ -157,39 +168,52 @@ export function ConversationTabs() {
           );
         })}
       </div>
-      {/* Inline export buttons for the active tab. Each button drives
-          a different serializer on the client (json → blob, md →
-          string, png → canvas). The buttons live next to the tabs so
-          "what you see is what you export". */}
+      {/* Single dropdown for exporting the active tab. All three
+          formats (PNG / MD / JSON) come from the same client-side
+          payload, so they're surfaced together instead of as three
+          separate header buttons. */}
       {activeId && (
-        <div className="flex shrink-0 items-center gap-1 pl-2">
-          <button
-            type="button"
-            onClick={() => void onExport("json")}
-            title={t("export.json")}
-            aria-label={t("export.json")}
-            className="inline-flex h-7 items-center rounded-md border bg-background px-2 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            JSON
-          </button>
-          <button
-            type="button"
-            onClick={() => void onExport("md")}
-            title={t("export.md")}
-            aria-label={t("export.md")}
-            className="inline-flex h-7 items-center rounded-md border bg-background px-2 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            MD
-          </button>
-          <button
-            type="button"
-            onClick={() => void onExport("png")}
-            title={t("export.png")}
-            aria-label={t("export.png")}
-            className="inline-flex h-7 items-center rounded-md border bg-background px-2 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            PNG
-          </button>
+        <div className="flex shrink-0 items-center pl-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                title={t("export.menuLabel")}
+                aria-label={t("export.menuLabel")}
+                className="inline-flex h-7 items-center gap-1 rounded-md border bg-background px-2 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <Download className="h-3 w-3" />
+                <span>{t("export.menu")}</span>
+                <ChevronDown className="h-3 w-3 opacity-60" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[180px]">
+              <DropdownMenuItem
+                onSelect={() => void onExport("png")}
+                className="gap-2"
+              >
+                <FileImage className="h-3.5 w-3.5" />
+                <span>PNG</span>
+                <span className="ml-auto text-[10px] text-muted-foreground">{t("export.png")}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => void onExport("md")}
+                className="gap-2"
+              >
+                <FileText className="h-3.5 w-3.5" />
+                <span>MD</span>
+                <span className="ml-auto text-[10px] text-muted-foreground">{t("export.md")}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => void onExport("json")}
+                className="gap-2"
+              >
+                <FileJson className="h-3.5 w-3.5" />
+                <span>JSON</span>
+                <span className="ml-auto text-[10px] text-muted-foreground">{t("export.json")}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       )}
     </div>

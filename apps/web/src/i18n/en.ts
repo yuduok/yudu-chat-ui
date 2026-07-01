@@ -111,6 +111,8 @@ export const en = {
   "export.json": "Export as JSON",
   "export.md": "Export as Markdown",
   "export.png": "Export as PNG",
+  "export.menu": "Export",
+  "export.menuLabel": "Export conversation",
 
   // Usage report (Activity drawer tab)
   "agent.activityTab": "Activity",
@@ -125,6 +127,7 @@ export const en = {
   "usage.provider": "Provider",
   "usage.model": "Model",
   "usage.empty": "No usage recorded yet.",
+  "usage.byModelEmpty": "No model usage recorded yet.",
 } as const;
 
 export type TranslationKey = keyof typeof en;
