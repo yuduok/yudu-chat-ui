@@ -20,6 +20,10 @@ export function AgentMenu() {
   const activeId = useChat((s) => s.activeId);
   const conversations = useChat((s) => s.conversations);
   const updateConv = useChat((s) => s.updateConversationSettings);
+  // Agent selection is a global chat-environment setting — it
+  // applies to every tab so the user doesn't have to re-pick an
+  // agent after switching. Title / systemPrompt stay per-row.
+  const applyGlobal = useChat((s) => s.applyGlobalSettings);
   const active = conversations.find((c) => c.id === activeId);
 
   const [agents, setAgents] = useState<AgentProfile[]>([]);
@@ -114,7 +118,3 @@ export function AgentMenu() {
     </DropdownMenu>
   );
 }
-  // Agent selection is a global chat-environment setting — it
-  // applies to every tab so the user doesn't have to re-pick an
-  // agent after switching. Title / systemPrompt stay per-row.
-  const applyGlobal = useChat((s) => s.applyGlobalSettings);

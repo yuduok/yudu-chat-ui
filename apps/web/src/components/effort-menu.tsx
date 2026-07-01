@@ -32,6 +32,9 @@ export function EffortMenu() {
   const activeId = useChat((s) => s.activeId);
   const conversations = useChat((s) => s.conversations);
   const updateConv = useChat((s) => s.updateConversationSettings);
+  // Reasoning depth is a global setting — it applies to every
+  // tab, so the user picks it once and forgets about it.
+  const applyGlobal = useChat((s) => s.applyGlobalSettings);
   const active = conversations.find((c) => c.id === activeId);
 
   // Mount-time guard so the menu doesn't render before there's a conversation.
@@ -87,6 +90,3 @@ export function EffortMenu() {
     </DropdownMenu>
   );
 }
-  // Reasoning depth is a global setting — it applies to every
-  // tab, so the user picks it once and forgets about it.
-  const applyGlobal = useChat((s) => s.applyGlobalSettings);

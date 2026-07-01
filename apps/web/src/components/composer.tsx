@@ -30,6 +30,12 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
   const stop = useChat((s) => s.stop);
   const streaming = useChat((s) => s.streaming);
   const updateConv = useChat((s) => s.updateConversationSettings);
+  // Provider / model / showThinking are *global* settings — they
+  // apply to every tab, not just the active one. We use
+  // `applyGlobalSettings` (server round-trip) for the bulk write
+  // and `useUiDefaults` (localStorage) for the client-side copy
+  // so a fresh tab/refresh restores the last-picked values.
+  const applyGlobal = useChat((s) => s.applyGlobalSettings);
   const conversations = useChat((s) => s.conversations);
   const activeId = useChat((s) => s.activeId);
   const active = conversations.find((c) => c.id === activeId);
@@ -201,9 +207,3 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
     </div>
   );
 }
-  // Provider / model / showThinking are *global* settings — they
-  // apply to every tab, not just the active one. We use
-  // `applyGlobalSettings` (server round-trip) for the bulk write
-  // and `useUiDefaults` (localStorage) for the client-side copy
-  // so a fresh tab/refresh restores the last-picked values.
-  const applyGlobal = useChat((s) => s.applyGlobalSettings);
