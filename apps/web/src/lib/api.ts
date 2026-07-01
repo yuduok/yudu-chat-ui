@@ -68,6 +68,29 @@ export async function updateConversation(
   return r.json();
 }
 
+// Apply a settings patch to every conversation row in one round
+// trip. Used by the global "settings are global" flow: a single
+// provider / model / agent / reasoning-depth / show-thinking
+// change in any tab is propagated to every existing chat so the
+// user never has to re-pick the same model when they switch tabs.
+export async function applyGlobalConversationSettings(
+  patch: Partial<
+    Pick<
+      Conversation,
+      "provider" | "model" | "agentId" | "reasoningEffort" | "showThinking"
+    >
+  >,
+): Promise<Conversation[]> {
+  const r = await fetch(`${BASE}/conversations/all`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) throw new Error("applyGlobalConversationSettings failed");
+  const data = (await r.json()) as { conversations: Conversation[] };
+  return data.conversations ?? [];
+}
+
 export async function deleteConversation(id: string): Promise<void> {
   await fetch(`${BASE}/conversations/${id}`, { method: "DELETE" });
 }

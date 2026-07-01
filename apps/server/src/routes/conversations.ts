@@ -9,6 +9,42 @@ import type {
   ConversationWithMessages,
 } from "@yudu/shared";
 
+// Fields that can be bulk-applied across every conversation row.
+// `title`, `systemPrompt` and `temperature` are intentionally
+// excluded — they vary per chat (auto-named, per-conversation
+// system prompt, per-conversation temperature). The rest are the
+// global chat "environment": which provider/model powers the
+// conversation, which agent orchestrates it, how hard it should
+// think, and whether the reasoning trace should be visible.
+type GlobalSettingsPatch = Partial<{
+  provider: string;
+  model: string;
+  agentId: string | null;
+  reasoningEffort: "low" | "medium" | "high" | "xhigh" | null;
+  showThinking: boolean | null;
+}>;
+
+// Translate the wire body into a strict DB patch. We never trust
+// fields the caller didn't send — `undefined` means "leave alone",
+// `null` means "explicitly clear". This is the single source of
+// truth for what a settings update may change; both the per-row
+// PATCH and the bulk PATCH route through it.
+function buildSettingsPatch(b: Record<string, unknown> | undefined): Record<string, unknown> {
+  const patch: Record<string, unknown> = { updatedAt: Date.now() };
+  if (!b) return patch;
+  if (typeof b.provider === "string") patch.provider = b.provider;
+  if (typeof b.model === "string") patch.model = b.model;
+  if (b.agentId !== undefined) patch.agentId = b.agentId;
+  if (b.reasoningEffort !== undefined) {
+    patch.reasoningEffort =
+      b.reasoningEffort === null ? null : String(b.reasoningEffort);
+  }
+  if (b.showThinking !== undefined) {
+    patch.showThinking = b.showThinking === null ? null : Boolean(b.showThinking);
+  }
+  return patch;
+}
+
 function rowToConversation(row: typeof conversations.$inferSelect): Conversation {
   return {
     id: row.id,
@@ -135,23 +171,40 @@ export async function conversationRoutes(app: FastifyInstance) {
     const patch: Record<string, unknown> = { updatedAt: Date.now() };
     const b = req.body ?? {};
     if (typeof b.title === "string") patch.title = b.title;
-    if (typeof b.provider === "string") patch.provider = b.provider;
-    if (typeof b.model === "string") patch.model = b.model;
     if (b.systemPrompt !== undefined) patch.systemPrompt = b.systemPrompt;
     if (b.temperature !== undefined) patch.temperature = b.temperature;
-    if (b.agentId !== undefined) patch.agentId = b.agentId;
-    if (b.reasoningEffort !== undefined) {
-      patch.reasoningEffort =
-        b.reasoningEffort === null ? null : String(b.reasoningEffort);
-    }
-    if (b.showThinking !== undefined) {
-      patch.showThinking = b.showThinking === null ? null : Boolean(b.showThinking);
-    }
+    // provider / model / agent / reasoningEffort / showThinking
+    // share the same wire contract as the bulk endpoint, so they
+    // route through the same validation helper.
+    const settings = buildSettingsPatch(b);
+    for (const k of Object.keys(settings)) patch[k] = settings[k];
     await db.update(conversations).set(patch).where(eq(conversations.id, id));
     const [conv] = await db.select().from(conversations).where(eq(conversations.id, id));
     if (!conv) return reply.code(404).send({ error: "Not found" });
     return rowToConversation(conv);
   });
+
+  // Bulk-apply a settings patch to every conversation row. The
+  // chat UI uses this so a single provider / model / agent /
+  // reasoning-depth / show-thinking change is reflected in every
+  // existing chat (and every future chat created from those
+  // defaults). Title / systemPrompt / temperature stay
+  // per-conversation and are rejected by the helper.
+  app.patch<{ Body: GlobalSettingsPatch }>(
+    "/api/conversations/all",
+    async (req) => {
+      const patch = buildSettingsPatch(req.body ?? {});
+      // If the caller sent nothing applicable (empty body or
+      // only per-row fields), this becomes `{ updatedAt }` —
+      // harmless, no rows actually change aside from a stamp.
+      await db.update(conversations).set(patch);
+      const rows = await db
+        .select()
+        .from(conversations)
+        .orderBy(desc(conversations.updatedAt));
+      return { ok: true, count: rows.length, conversations: rows.map(rowToConversation) };
+    },
+  );
 
   // Delete
   app.delete<{ Params: { id: string } }>(
