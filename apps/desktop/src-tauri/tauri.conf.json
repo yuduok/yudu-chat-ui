@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Yudu Chat",
+  "version": "0.1.0",
+  "identifier": "com.yudu.chat",
+  "build": {
+    "beforeDevCommand": "pnpm --filter @yudu/web dev -- --port 5173 --strictPort",
+    "beforeBuildCommand": "pnpm --filter @yudu/web build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../../../apps/web/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Yudu Chat",
+        "width": 1180,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 560,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
+        "titleBarStyle": "Visible"
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "Personal AI chat workspace",
+    "longDescription": "Yudu Chat — multi-provider AI chat with persistent conversations, tool calling and agents.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": ["resources/*"],
+    "externalBin": ["binaries/yudu-server"],
+    "copyright": "",
+    "homepage": "",
+    "publisher": "yudu"
+  }
+}

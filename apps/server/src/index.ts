@@ -11,36 +11,42 @@ import { usageRoutes } from "./routes/usage.js";
 import { loadAgents } from "./agents/index.js";
 import { registerBuiltinTools } from "./tools/builtin.js";
 
-const app = Fastify({
-  logger: {
-    level: process.env.LOG_LEVEL ?? "info",
-  },
-});
+export async function start(): Promise<void> {
+  const app = Fastify({
+    logger: {
+      level: process.env.LOG_LEVEL ?? "info",
+    },
+  });
 
-await app.register(cors, { origin: true, credentials: true });
-await app.register(sensible);
-await app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024 } });
+  await app.register(cors, { origin: true, credentials: true });
+  await app.register(sensible);
+  await app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024 } });
 
-app.get("/api/health", async () => ({ ok: true, ts: Date.now() }));
+  app.get("/api/health", async () => ({ ok: true, ts: Date.now() }));
 
-// Bootstrap side-effects: load agent profiles and register built-in tools.
-registerBuiltinTools();
-await loadAgents();
+  // Bootstrap side-effects: load agent profiles and register built-in tools.
+  registerBuiltinTools();
+  await loadAgents();
 
-await app.register(conversationRoutes);
-await app.register(chatRoutes);
-await app.register(providerRoutes);
-await app.register(settingsRoutes);
-await app.register(agentRoutes);
-await app.register(usageRoutes);
+  await app.register(conversationRoutes);
+  await app.register(chatRoutes);
+  await app.register(providerRoutes);
+  await app.register(settingsRoutes);
+  await app.register(agentRoutes);
+  await app.register(usageRoutes);
 
-const port = Number(process.env.PORT ?? 8787);
-const host = process.env.HOST ?? "0.0.0.0";
+  const port = Number(process.env.PORT ?? 8787);
+  const host = process.env.HOST ?? "0.0.0.0";
 
-try {
-  await app.listen({ port, host });
-  app.log.info(`Server listening on http://${host}:${port}`);
-} catch (err) {
-  app.log.error(err);
-  process.exit(1);
+  try {
+    await app.listen({ port, host });
+    app.log.info(`Server listening on http://${host}:${port}`);
+  } catch (err) {
+    app.log.error(err);
+    process.exit(1);
+  }
 }
+
+// ESM (tsx / vite) 下顶层 await 可用,直接启动;
+// CJS (pkg 打包) 下 esbuild 会把 start() 调用编译为 promise,执行端包一层 IIFE。
+start().catch((err) => { console.error(err); process.exit(1); });

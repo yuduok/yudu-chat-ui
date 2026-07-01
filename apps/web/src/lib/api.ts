@@ -10,7 +10,16 @@ import type {
   UsageReport,
 } from "@yudu/shared";
 
-const BASE = "/api";
+// Resolve API base:在 Tauri 桌面模式下直接走 loopback 端口(与 WebView 不同 origin);
+// Web 模式下保留相对路径 /api,由 Vite 代理到 127.0.0.1:8787。
+function resolveApiBase(): string {
+  if (typeof window !== "undefined") {
+    const w = window as unknown as { __TAURI_INTERNALS__?: unknown; __TAURI__?: unknown };
+    if (w.__TAURI_INTERNALS__ || w.__TAURI__) return "http://127.0.0.1:8787/api";
+  }
+  return "/api";
+}
+const BASE = resolveApiBase();
 
 export async function listConversations(): Promise<Conversation[]> {
   const r = await fetch(`${BASE}/conversations`);

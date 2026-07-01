@@ -2,9 +2,15 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import * as schema from "./schema.js";
 
-const dataDir = path.resolve(process.cwd(), "data");
+// Desktop (Tauri sidecar) 模式下,把数据写到系统标准目录(由 sidecar 注入
+// YUDU_DATA_DIR);Web 模式下保留原行为:写到 cwd/data,方便本地开发。
+const isDesktop = process.env.YUDU_DESKTOP === "1";
+const dataDir = isDesktop
+  ? (process.env.YUDU_DATA_DIR ?? path.join(os.homedir(), ".yudu-chat"))
+  : path.resolve(process.cwd(), "data");
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 const dbPath = path.join(dataDir, "yudu-chat.db");
 
