@@ -9,7 +9,9 @@
     "dev:server": "pnpm --filter @yudu/server dev",
     "dev:web": "pnpm --filter @yudu/web dev",
     "build": "pnpm -r run build",
-    "typecheck": "pnpm -r run typecheck"
+    "typecheck": "pnpm -r run typecheck",
+    "dev:desktop": "pnpm --filter @yudu/desktop dev",
+    "build:desktop": "pnpm --filter @yudu/desktop build:web && pnpm --filter @yudu/desktop build:server && pnpm --filter @yudu/desktop build"
   },
   "packageManager": "pnpm@9.10.0"
 }

@@ -298,3 +298,74 @@ Layered on top of v4:
 - `GET /api/conversations/:id/export` — JSON download (schema 1)
 - `POST /api/conversations/import` — body is an ExportedConversation
 - `GET /api/usage` — token totals + per-provider / per-model buckets
+
+## Desktop (Tauri)
+
+The project also ships a native desktop build via [Tauri](https://tauri.app). It
+re-uses the existing `apps/web` and `apps/server` workspaces without forking them.
+
+Layout (added):
+
+```
+apps/desktop/
+  src-tauri/         Rust shell + Tauri config + capabilities
+    src/lib.rs       starts/stops the sidecar, registers commands
+    src/commands.rs  IPC commands (server_status, open_external, …)
+    src/state.rs     sidecar child handle
+    capabilities/    Tauri permission set
+    icons/           placeholder icons (replace with your own)
+    binaries/        yudu-server-<triple> sidecar binaries (gitignored output)
+  scripts/
+    bundle-server.mjs  esbuild + @yao-pkg/pkg pipeline
+  src/              minimal Tauri entry (status panel) for dev-mode preview
+```
+
+### One-time setup
+
+1. Install the Rust toolchain (`rustup` from <https://rustup.rs>) and on macOS,
+   the Xcode Command Line Tools (`xcode-select --install`). Tauri 2 needs
+   `rustc ≥ 1.77`.
+2. `pnpm install` (from repo root) — pulls the Tauri CLI, plugins and esbuild.
+
+### Develop (web UI hot-reload + native shell)
+
+```bash
+pnpm dev:desktop          # opens a Tauri window; vite + Fastify still run separately
+pnpm dev:web              # terminal A — vite dev server
+pnpm dev:server           # terminal B — Fastify on 127.0.0.1:8787
+```
+
+In `tauri dev` the Rust shell starts but **does not** auto-spawn the sidecar
+(it expects you to run `pnpm dev:server` so you can edit server code with HMR).
+The web UI inside the window talks to `http://127.0.0.1:8787/api`.
+
+### Build a release app
+
+```bash
+pnpm build:desktop
+```
+
+This runs, in order:
+
+1. `apps/web` build → `apps/web/dist`
+2. `apps/server` build → esbuild CJS bundle → `@yao-pkg/pkg` SEA → `apps/desktop/src-tauri/binaries/yudu-server-<triple>`
+3. `tauri build` → `apps/desktop/src-tauri/target/release/bundle/{dmg,msi,deb,…}` plus the launcher binary
+
+The bundle embeds the sidecar and the SQLite native binding; user data
+(conversations, providers, settings) lives in the OS-standard `app_data_dir`
+(macOS: `~/Library/Application Support/com.yudu.chat/`).
+
+### Cross-compiling
+
+`bundle-server.mjs` reads `process.platform` + `process.arch`, so build on each
+target host. For Linux→Windows or similar, run the same command inside a
+Docker container or CI runner with the matching toolchain.
+
+### How the sidecar finds `better-sqlite3`
+
+`better-sqlite3` ships a native binding that can't be statically embedded into a
+pkg/SEA binary. The bundler (1) copies the `.node` binding into
+`apps/server/dist-server/native/` and (2) adds it as an `assets` entry so pkg
+keeps it on disk. The bundle's banner detects `process.pkg`, extracts the
+binding to `os.tmpdir()`, and rewrites `Module._resolveFilename` + `Fs.statSync`
+so `require('bindings')('better_sqlite3.node')` resolves to that extracted file.
