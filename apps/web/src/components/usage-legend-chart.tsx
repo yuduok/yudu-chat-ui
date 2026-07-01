@@ -1,17 +1,22 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import type { UsageRingSlice } from "@/components/usage-ring-chart";
-import { UsageRingChart } from "@/components/usage-ring-chart";
+import {
+  UsageRingChart,
+  formatPercent,
+  formatTokens,
+  type UsageRingSlice,
+} from "@/components/usage-ring-chart";
 
 /**
  * Donut + side legend used by both the "By provider" and "By model"
  * sections of the Usage tab. Hovering a legend row or a slice keeps
  * the two in sync via shared hover state, so the focused slice grows
- * outward in the chart while its row in the legend is highlighted.
+ * in the chart while its row in the legend is highlighted.
  *
- * Layout note: the rows are simple blocks rather than flex lines so
- * the focused prompt/completion breakdown can wrap below the label
- * without breaking the alignment of the percentage / total columns.
+ * Keyboard parity: legend rows are real focusable buttons so keyboard
+ * users can step through buckets the same way mouse users hover them.
+ * The SVG slices are aria-hidden because the legend already exposes
+ * the same data; announcing both would double up.
  */
 export function UsageLegendChart({
   slices,
@@ -20,7 +25,6 @@ export function UsageLegendChart({
   emptyLabel,
   tokensLabelPrompt,
   tokensLabelCompletion,
-  formatTokens,
 }: {
   slices: UsageRingSlice[];
   totalLabel: string;
@@ -28,7 +32,6 @@ export function UsageLegendChart({
   emptyLabel: string;
   tokensLabelPrompt: string;
   tokensLabelCompletion: string;
-  formatTokens: (n: number) => string;
 }) {
   const [hovered, setHovered] = useState<string | null>(null);
 
@@ -36,6 +39,14 @@ export function UsageLegendChart({
   const focused = hovered ? slices.find((s) => s.key === hovered) : null;
   const centerValue = focused ? formatTokens(focused.totalTokens) : totalValue;
   const centerTitle = focused ? focused.label : totalLabel;
+
+  if (slices.length === 0) {
+    return (
+      <p className="rounded-md border border-dashed bg-muted/30 px-3 py-4 text-center text-[11px] text-muted-foreground">
+        {emptyLabel}
+      </p>
+    );
+  }
 
   return (
     <div className="flex items-center gap-4 rounded-md border bg-card px-3 py-3">
@@ -45,25 +56,26 @@ export function UsageLegendChart({
         thickness={16}
         centerTitle={centerTitle}
         centerValue={centerValue}
-        emptyLabel={emptyLabel}
         className="shrink-0"
       />
-      <ul className="min-w-0 flex-1 space-y-1">
-        {slices.length === 0 ? (
-          <li className="text-[11px] text-muted-foreground">{emptyLabel}</li>
-        ) : (
-          slices.map((s) => {
-            const fraction = total > 0 ? s.totalTokens / total : 0;
-            const isFocused = hovered === s.key;
-            return (
-              <li
-                key={s.key}
-                className={cn(
-                  "rounded px-1.5 py-1 text-[11px] transition-colors",
-                  isFocused ? "bg-accent/60" : "hover:bg-muted/60",
-                )}
+      <ul className="min-w-0 flex-1 space-y-1" role="list">
+        {slices.map((s) => {
+          const fraction = total > 0 ? s.totalTokens / total : 0;
+          const isFocused = hovered === s.key;
+          return (
+            <li key={s.key}>
+              <button
+                type="button"
                 onMouseEnter={() => setHovered(s.key)}
                 onMouseLeave={() => setHovered(null)}
+                onFocus={() => setHovered(s.key)}
+                onBlur={() => setHovered(null)}
+                aria-pressed={isFocused}
+                aria-label={`${s.label}${s.sublabel ? ` (${s.sublabel})` : ""}: ${formatPercent(fraction)}, ${formatTokens(s.totalTokens)} tokens`}
+                className={cn(
+                  "w-full rounded px-1.5 py-1 text-left text-[11px] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  isFocused ? "bg-accent/60" : "hover:bg-muted/60",
+                )}
               >
                 <div className="flex items-center gap-2">
                   <span
@@ -81,7 +93,7 @@ export function UsageLegendChart({
                     )}
                   </span>
                   <span className="shrink-0 tabular-nums text-muted-foreground">
-                    {(fraction * 100).toFixed(fraction >= 0.1 ? 1 : 0)}%
+                    {formatPercent(fraction)}
                   </span>
                   <span className="shrink-0 w-16 text-right tabular-nums">
                     {formatTokens(s.totalTokens)}
@@ -92,10 +104,10 @@ export function UsageLegendChart({
                     {tokensLabelPrompt} {formatTokens(s.promptTokens)} · {tokensLabelCompletion} {formatTokens(s.completionTokens)}
                   </div>
                 )}
-              </li>
-            );
-          })
-        )}
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

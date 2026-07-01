@@ -127,4 +127,5 @@ export const zh: Record<TranslationKey, string> = {
   "usage.provider": "供应商",
   "usage.model": "模型",
   "usage.empty": "暂无用量记录。",
+  "usage.byModelEmpty": "暂无模型用量记录。",
 };

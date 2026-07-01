@@ -127,6 +127,7 @@ export const en = {
   "usage.provider": "Provider",
   "usage.model": "Model",
   "usage.empty": "No usage recorded yet.",
+  "usage.byModelEmpty": "No model usage recorded yet.",
 } as const;
 
 export type TranslationKey = keyof typeof en;

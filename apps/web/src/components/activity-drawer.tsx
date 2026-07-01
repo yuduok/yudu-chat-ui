@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useChat } from "@/store/chat";
 import { useI18n } from "@/i18n";
 import { ToolCallRow } from "@/components/message";
-import { UsageRingChart, bucketsToSlices, type UsageRingSlice } from "@/components/usage-ring-chart";
+import { formatTokens as formatTokensShared, bucketsToSlices } from "@/components/usage-ring-chart";
 import { UsageLegendChart } from "@/components/usage-legend-chart";
 import * as api from "@/lib/api";
 import type { UsageReport } from "@yudu/shared";
@@ -53,11 +53,7 @@ export function ActivityDrawer({ open, onOpenChange }: { open: boolean; onOpenCh
 
   const running = toolCalls.some((c) => c.status === "running");
 
-  const formatTokens = (n: number) => {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-    return String(n);
-  };
+  const formatTokens = formatTokensShared;
 
   const totalRow = useMemo(() => {
     if (!usage) return null;
@@ -228,38 +224,32 @@ export function ActivityDrawer({ open, onOpenChange }: { open: boolean; onOpenCh
                 </section>
               )}
 
-              {providerSlices.length > 0 && (
-                <section className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {t("usage.byProvider")}
-                  </h3>
-                  <UsageLegendChart
-                    slices={providerSlices}
-                    totalLabel={t("usage.total")}
-                    totalValue={formatTokens(usage ? usage.total.totalTokens : 0)}
-                    emptyLabel={t("usage.empty")}
-                    tokensLabelPrompt={t("usage.prompt")}
-                    tokensLabelCompletion={t("usage.completion")}
-                    formatTokens={formatTokens}
-                  />
-                </section>
-              )}
-              {modelSlices.length > 0 && (
-                <section className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {t("usage.byModel")}
-                  </h3>
-                  <UsageLegendChart
-                    slices={modelSlices}
-                    totalLabel={t("usage.model")}
-                    totalValue={formatTokens(usage ? usage.total.totalTokens : 0)}
-                    emptyLabel={t("usage.empty")}
-                    tokensLabelPrompt={t("usage.prompt")}
-                    tokensLabelCompletion={t("usage.completion")}
-                    formatTokens={formatTokens}
-                  />
-                </section>
-              )}
+              <section className="space-y-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t("usage.byProvider")}
+                </h3>
+                <UsageLegendChart
+                  slices={providerSlices}
+                  totalLabel={t("usage.total")}
+                  totalValue={formatTokens(usage ? usage.total.totalTokens : 0)}
+                  emptyLabel={t("usage.empty")}
+                  tokensLabelPrompt={t("usage.prompt")}
+                  tokensLabelCompletion={t("usage.completion")}
+                />
+              </section>
+              <section className="space-y-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t("usage.byModel")}
+                </h3>
+                <UsageLegendChart
+                  slices={modelSlices}
+                  totalLabel={t("usage.model")}
+                  totalValue={formatTokens(usage ? usage.total.totalTokens : 0)}
+                  emptyLabel={t("usage.byModelEmpty")}
+                  tokensLabelPrompt={t("usage.prompt")}
+                  tokensLabelCompletion={t("usage.completion")}
+                />
+              </section>
             </div>
           </TabsContent>
         </Tabs>

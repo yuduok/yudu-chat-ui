@@ -5,14 +5,15 @@ import { cn } from "@/lib/utils";
 /**
  * Donut/ring chart for the usage report. Each slice is a bucket
  * (provider or `(provider, model)`). On hover, the focused slice grows
- * slightly outward and dims the others; a tooltip renders the bucket
- * name, its share of total tokens, and the prompt/completion breakdown.
+ * slightly outward and dims the others; a tooltip-style overlay renders
+ * the bucket name, its share of total tokens, and the prompt/completion
+ * breakdown.
  *
  * The component is dependency-free — slices are drawn as SVG `<circle>`
  * strokes so we get clean anti-aliased arcs without pulling in a chart
  * library. We use `stroke-dasharray` + `stroke-dashoffset` to lay each
- * arc around a common circumference and rely on `transform: rotate`
- * to fan them out from the 12 o'clock start.
+ * arc around a common circumference and rely on `transform: rotate` to
+ * fan them out from the 12 o'clock start.
  */
 
 export interface UsageRingSlice {
@@ -44,7 +45,10 @@ function paletteColor(i: number): string {
   return PALETTE[i % PALETTE.length];
 }
 
-export function bucketsToSlices(buckets: UsageBucket[], opts?: { sublabelFromModel?: boolean }): UsageRingSlice[] {
+export function bucketsToSlices(
+  buckets: UsageBucket[],
+  opts?: { sublabelFromModel?: boolean },
+): UsageRingSlice[] {
   return buckets.map((b, i) => ({
     key: opts?.sublabelFromModel ? `${b.provider}/${b.model}` : b.provider,
     label: opts?.sublabelFromModel ? b.model : b.provider,
@@ -54,6 +58,20 @@ export function bucketsToSlices(buckets: UsageBucket[], opts?: { sublabelFromMod
     completionTokens: b.completionTokens,
     color: paletteColor(i),
   }));
+}
+
+/** Compact 1.2K / 3.4M formatter shared with the usage drawer. */
+export function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+/** Whole-number percent with a "<1%" floor so 0% never lies about presence. */
+export function formatPercent(f: number): string {
+  if (f >= 0.1) return `${(f * 100).toFixed(1)}%`;
+  if (f > 0) return `<1%`;
+  return "0%";
 }
 
 interface RingChartProps {
@@ -117,9 +135,14 @@ export function UsageRingChart({
 
   const hovered = hoveredKey ? laid.find((l) => l.slice.key === hoveredKey) ?? null : null;
   const centerLabel = hovered ? hovered.slice.label : centerTitle;
-  const centerSub = hovered
-    ? formatPercent(hovered.fraction)
-    : centerValue;
+  const centerSub = hovered ? formatPercent(hovered.fraction) : centerValue;
+
+  // a11y: the SVG announces whatever the visible center label is, so
+  // screen readers hear the focused slice name when the user hovers a
+  // legend row. Without this, the label only changes visually.
+  const a11yLabel = hovered
+    ? `${hovered.slice.label}: ${formatPercent(hovered.fraction)}, ${formatTokens(hovered.slice.totalTokens)} tokens`
+    : `${centerTitle ?? "Usage ring"}: ${centerValue ?? ""}`.trim();
 
   return (
     <div
@@ -133,7 +156,7 @@ export function UsageRingChart({
         // Rotate -90deg so the first slice starts at the top.
         style={{ transform: "rotate(-90deg)" }}
         role="img"
-        aria-label={centerTitle ?? "Usage ring"}
+        aria-label={a11yLabel}
       >
         {/* Background ring: a single muted circle that shows the empty
             portion of the donut when fewer slices are drawn than 100%. */}
@@ -149,8 +172,9 @@ export function UsageRingChart({
         {laid.map(({ slice, length, offset }) => {
           const isHovered = hoveredKey === slice.key;
           const isDimmed = hoveredKey !== null && !isHovered;
-          // Nudge the focused slice outward so it visibly pops on hover.
-          const outward = isHovered ? thickness * 0.35 : 0;
+          // Thicken the focused slice's stroke — the visible "pop"
+          // comes from the wider stroke + unchanged radius.
+          const extra = isHovered ? thickness * 0.35 : 0;
           return (
             <circle
               key={slice.key}
@@ -159,23 +183,17 @@ export function UsageRingChart({
               r={radius}
               fill="none"
               stroke={slice.color}
-              strokeWidth={thickness + outward * 2}
+              strokeWidth={thickness + extra * 2}
               strokeLinecap="butt"
               strokeDasharray={`${length} ${circumference - length}`}
               strokeDashoffset={-offset}
               opacity={isDimmed ? 0.35 : 1}
               style={{
                 transition: "opacity 120ms ease-out, stroke-width 120ms ease-out",
-                cursor: "pointer",
               }}
-              onMouseEnter={() => setHoveredKey(slice.key)}
-              onMouseLeave={() => setHoveredKey(null)}
-              onFocus={() => setHoveredKey(slice.key)}
-              onBlur={() => setHoveredKey(null)}
-              tabIndex={0}
-            >
-              <title>{slice.label}: {formatTokens(slice.totalTokens)}</title>
-            </circle>
+              aria-hidden
+              focusable={false}
+            />
           );
         })}
       </svg>
@@ -184,9 +202,7 @@ export function UsageRingChart({
         <div className="max-w-[70%] truncate text-[10px] uppercase tracking-wide text-muted-foreground">
           {centerLabel}
         </div>
-        <div className="mt-0.5 text-sm font-semibold tabular-nums">
-          {centerSub}
-        </div>
+        <div className="mt-0.5 text-sm font-semibold tabular-nums">{centerSub}</div>
         {hovered && (
           <div className="mt-1 text-[10px] tabular-nums text-muted-foreground">
             {formatTokens(hovered.slice.promptTokens)} / {formatTokens(hovered.slice.completionTokens)}
@@ -195,16 +211,4 @@ export function UsageRingChart({
       </div>
     </div>
   );
-}
-
-function formatPercent(f: number): string {
-  if (f >= 0.1) return `${(f * 100).toFixed(1)}%`;
-  if (f > 0) return `<1%`;
-  return "0%";
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
 }
