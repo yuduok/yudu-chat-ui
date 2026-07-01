@@ -75,7 +75,7 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
             value={active?.provider ?? undefined}
             onValueChange={(v) => {
               useUiDefaults.getState().setProvider(v);
-              if (activeId) void updateConv(activeId, { provider: v });
+              void applyGlobal({ provider: v });
             }}
             disabled={!active}
           >
@@ -94,7 +94,7 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
             value={active?.model ?? undefined}
             onValueChange={(v) => {
               useUiDefaults.getState().setModel(v);
-              if (activeId) void updateConv(activeId, { model: v });
+              void applyGlobal({ model: v });
             }}
             disabled={!active}
           >
@@ -180,7 +180,7 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
               checked={showThinking}
               onCheckedChange={(v) => {
                 useUiDefaults.getState().setShowThinking(v);
-                if (activeId) void updateConv(activeId, { showThinking: v });
+                void applyGlobal({ showThinking: v });
               }}
               disabled={!activeId}
               aria-label={t("reasoning.showThinking")}
@@ -201,3 +201,9 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
     </div>
   );
 }
+  // Provider / model / showThinking are *global* settings — they
+  // apply to every tab, not just the active one. We use
+  // `applyGlobalSettings` (server round-trip) for the bulk write
+  // and `useUiDefaults` (localStorage) for the client-side copy
+  // so a fresh tab/refresh restores the last-picked values.
+  const applyGlobal = useChat((s) => s.applyGlobalSettings);

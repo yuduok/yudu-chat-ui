@@ -69,7 +69,7 @@ export function EffortMenu() {
               (() => {
                 const next = o.id === "null" ? null : (o.id as ReasoningEffort);
                 useUiDefaults.getState().setReasoningEffort(next);
-                void updateConv(active.id, { reasoningEffort: next });
+                void applyGlobal({ reasoningEffort: next });
               })()
             }
             className="flex items-center justify-between gap-2"
@@ -87,3 +87,6 @@ export function EffortMenu() {
     </DropdownMenu>
   );
 }
+  // Reasoning depth is a global setting — it applies to every
+  // tab, so the user picks it once and forgets about it.
+  const applyGlobal = useChat((s) => s.applyGlobalSettings);

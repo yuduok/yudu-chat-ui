@@ -69,7 +69,7 @@ export function AgentMenu() {
         <DropdownMenuItem
           onSelect={() => {
             useUiDefaults.getState().setAgentId(null);
-            void updateConv(active.id, { agentId: null });
+            void applyGlobal({ agentId: null });
           }}
           className="flex items-start gap-2"
         >
@@ -87,7 +87,7 @@ export function AgentMenu() {
             key={a.id}
             onSelect={() => {
               useUiDefaults.getState().setAgentId(a.id);
-              void updateConv(active.id, { agentId: a.id });
+              void applyGlobal({ agentId: a.id });
             }}
             className="flex items-start gap-2"
           >
@@ -114,3 +114,7 @@ export function AgentMenu() {
     </DropdownMenu>
   );
 }
+  // Agent selection is a global chat-environment setting — it
+  // applies to every tab so the user doesn't have to re-pick an
+  // agent after switching. Title / systemPrompt stay per-row.
+  const applyGlobal = useChat((s) => s.applyGlobalSettings);

@@ -78,6 +78,20 @@ interface ChatState {
       >
     >,
   ) => Promise<void>;
+  // Apply a "global" settings patch to every conversation row.
+  // The composer / agent / effort menus call this so changing the
+  // provider / model / agent / reasoning-depth / show-thinking in
+  // any tab is reflected across all tabs without the user having
+  // to re-pick the same option. Title / systemPrompt / temperature
+  // are intentionally NOT in this patch — those stay per-row.
+  applyGlobalSettings: (
+    patch: Partial<
+      Pick<
+        Conversation,
+        "provider" | "model" | "agentId" | "reasoningEffort" | "showThinking"
+      >
+    >,
+  ) => Promise<void>;
   deleteMessage: (id: string) => Promise<void>;
   // Import a previously-exported conversation JSON object. The server
   // re-keys ids so the import never collides with existing data; we
@@ -150,6 +164,29 @@ export const useChat = create<ChatState>((set, get) => ({
 
   async loadConversations() {
     const list = await api.listConversations();
+    // Convergence: if localStorage has never been written to for the
+    // UI defaults (i.e. this is the first load with the new global-
+    // settings model — every prior conversation was using its own
+    // per-row values), seed the defaults from the most-recently
+    // updated row so existing users don't see the active chat reset
+    // to mock/mock-1 after the upgrade. After this one-shot, the
+    // user-owned localStorage entry takes over and `applyGlobal…`
+    // keeps it (and the DB) in sync across every tab.
+    const ui = useUiDefaults.getState();
+    const hasPersisted =
+      typeof window !== "undefined" &&
+      !!window.localStorage.getItem("yudu-ui-defaults");
+    if (!hasPersisted && list.length > 0) {
+      const latest = list.slice().sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      ui.hydrate({
+        provider: latest.provider,
+        model: latest.model,
+        agentId: latest.agentId ?? null,
+        reasoningEffort:
+          (latest.reasoningEffort as UiReasoningEffort) ?? null,
+        showThinking: latest.showThinking ?? true,
+      });
+    }
     set((s) => {
       // Reconcile `openTabs` with the latest server list: keep any
       // existing open tab that's still in the DB; drop any that
@@ -262,6 +299,31 @@ export const useChat = create<ChatState>((set, get) => ({
     set((s) => ({
       conversations: s.conversations.map((c) => (c.id === id ? updated : c)),
     }));
+  },
+
+  async applyGlobalSettings(patch) {
+    // The server is authoritative for the row state, but the
+    // server's response only contains the fields it knows about
+    // (provider / model / agent / reasoningEffort / showThinking
+    // + ids + timestamps). We merge the patch into every cached
+    // row by id so the UI updates instantly without waiting for
+    // the round-trip — the subsequent `set` from the server
+    // response just confirms what we already showed.
+    set((s) => ({
+      conversations: s.conversations.map((c) => ({ ...c, ...patch })),
+    }));
+    const updated = await api.applyGlobalConversationSettings(patch);
+    if (updated.length) {
+      set((s) => {
+        // Build a lookup so we overwrite the optimistic values
+        // with whatever the server actually persisted (handles
+        // nulling fields, server-side normalization, etc.).
+        const byId = new Map(updated.map((c) => [c.id, c]));
+        return {
+          conversations: s.conversations.map((c) => byId.get(c.id) ?? c),
+        };
+      });
+    }
   },
 
   async deleteMessage(id) {
@@ -459,3 +521,4 @@ export const useChat = create<ChatState>((set, get) => ({
     }
   },
 }));
+import type { ReasoningEffort as UiReasoningEffort } from "@/store/ui-defaults";
