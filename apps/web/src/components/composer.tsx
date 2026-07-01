@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useChat } from "@/store/chat";
+import { useUiDefaults } from "@/store/ui-defaults";
 import { useI18n } from "@/i18n";
 import { AgentMenu } from "@/components/agent-menu";
 import { EffortMenu } from "@/components/effort-menu";
@@ -72,7 +73,10 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
           <EffortMenu />
           <Select
             value={active?.provider ?? undefined}
-            onValueChange={(v) => activeId && void updateConv(activeId, { provider: v })}
+            onValueChange={(v) => {
+              useUiDefaults.getState().setProvider(v);
+              if (activeId) void updateConv(activeId, { provider: v });
+            }}
             disabled={!active}
           >
             <SelectTrigger className="h-8 w-[140px] text-xs" aria-label={t("settings.provider")}>
@@ -88,7 +92,10 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
           </Select>
           <Select
             value={active?.model ?? undefined}
-            onValueChange={(v) => activeId && void updateConv(activeId, { model: v })}
+            onValueChange={(v) => {
+              useUiDefaults.getState().setModel(v);
+              if (activeId) void updateConv(activeId, { model: v });
+            }}
             disabled={!active}
           >
             <SelectTrigger className="h-8 min-w-[160px] flex-1 text-xs sm:w-[200px] sm:flex-none">
@@ -172,6 +179,7 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
               id="composer-show-thinking"
               checked={showThinking}
               onCheckedChange={(v) => {
+                useUiDefaults.getState().setShowThinking(v);
                 if (activeId) void updateConv(activeId, { showThinking: v });
               }}
               disabled={!activeId}

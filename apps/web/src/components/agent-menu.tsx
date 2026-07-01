@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { useChat } from "@/store/chat";
+import { useUiDefaults } from "@/store/ui-defaults";
 import { useI18n } from "@/i18n";
 import type { AgentProfile } from "@yudu/shared";
 import * as api from "@/lib/api";
@@ -66,7 +67,10 @@ export function AgentMenu() {
           {t("agent.menu")}
         </div>
         <DropdownMenuItem
-          onSelect={() => void updateConv(active.id, { agentId: null })}
+          onSelect={() => {
+            useUiDefaults.getState().setAgentId(null);
+            void updateConv(active.id, { agentId: null });
+          }}
           className="flex items-start gap-2"
         >
           <Check className={cn("mt-0.5 h-3.5 w-3.5", !active.agentId ? "opacity-100" : "opacity-0")} />
@@ -81,7 +85,10 @@ export function AgentMenu() {
         {agents.map((a) => (
           <DropdownMenuItem
             key={a.id}
-            onSelect={() => void updateConv(active.id, { agentId: a.id })}
+            onSelect={() => {
+              useUiDefaults.getState().setAgentId(a.id);
+              void updateConv(active.id, { agentId: a.id });
+            }}
             className="flex items-start gap-2"
           >
             <Check

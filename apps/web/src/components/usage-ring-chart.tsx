@@ -14,6 +14,13 @@ import { cn } from "@/lib/utils";
  * library. We use `stroke-dasharray` + `stroke-dashoffset` to lay each
  * arc around a common circumference and rely on `transform: rotate` to
  * fan them out from the 12 o'clock start.
+ *
+ * The component is fully controlled: the parent owns the focused-slice
+ * key and we report hover changes back via `onHoverChange`. This lets
+ * the side legend and the donut stay in sync regardless of which side
+ * the user interacted with. When uncontrolled (no `hoveredKey` prop
+ * passed) we fall back to local state so the chart can still be used
+ * standalone.
  */
 
 export interface UsageRingSlice {
@@ -49,15 +56,22 @@ export function bucketsToSlices(
   buckets: UsageBucket[],
   opts?: { sublabelFromModel?: boolean },
 ): UsageRingSlice[] {
-  return buckets.map((b, i) => ({
-    key: opts?.sublabelFromModel ? `${b.provider}/${b.model}` : b.provider,
-    label: opts?.sublabelFromModel ? b.model : b.provider,
-    sublabel: opts?.sublabelFromModel ? b.provider : undefined,
-    totalTokens: b.totalTokens,
-    promptTokens: b.promptTokens,
-    completionTokens: b.completionTokens,
-    color: paletteColor(i),
-  }));
+  return buckets.map((b, i) => {
+    const sublabel = opts?.sublabelFromModel
+      ? (b.providers && b.providers.length > 1
+          ? b.providers.join(", ")
+          : b.provider)
+      : undefined;
+    return {
+      key: opts?.sublabelFromModel ? b.model : b.provider,
+      label: opts?.sublabelFromModel ? b.model : b.provider,
+      sublabel,
+      totalTokens: b.totalTokens,
+      promptTokens: b.promptTokens,
+      completionTokens: b.completionTokens,
+      color: paletteColor(i),
+    };
+  });
 }
 
 /** Compact 1.2K / 3.4M formatter shared with the usage drawer. */
@@ -82,6 +96,9 @@ interface RingChartProps {
   centerValue?: string;
   emptyLabel?: string;
   className?: string;
+  /** Controlled hover state. Omit to use local state. */
+  hoveredKey?: string | null;
+  onHoverChange?: (key: string | null) => void;
 }
 
 export function UsageRingChart({
@@ -92,9 +109,18 @@ export function UsageRingChart({
   centerValue,
   emptyLabel,
   className,
+  hoveredKey: controlledHoveredKey,
+  onHoverChange,
 }: RingChartProps) {
   const total = useMemo(() => slices.reduce((sum, s) => sum + s.totalTokens, 0), [slices]);
-  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+  // Local fallback state for the uncontrolled case.
+  const [localHoveredKey, setLocalHoveredKey] = useState<string | null>(null);
+  const isControlled = controlledHoveredKey !== undefined;
+  const hoveredKey = isControlled ? controlledHoveredKey! : localHoveredKey;
+  const setHoveredKey = (k: string | null) => {
+    if (onHoverChange) onHoverChange(k);
+    if (!isControlled) setLocalHoveredKey(k);
+  };
 
   // Geometry: a square viewBox lets us compute everything in pixel
   // units. Stroke arcs the donut by starting at the top (12 o'clock).
@@ -139,7 +165,7 @@ export function UsageRingChart({
 
   // a11y: the SVG announces whatever the visible center label is, so
   // screen readers hear the focused slice name when the user hovers a
-  // legend row. Without this, the label only changes visually.
+  // legend row or a slice. Without this, the label only changes visually.
   const a11yLabel = hovered
     ? `${hovered.slice.label}: ${formatPercent(hovered.fraction)}, ${formatTokens(hovered.slice.totalTokens)} tokens`
     : `${centerTitle ?? "Usage ring"}: ${centerValue ?? ""}`.trim();
@@ -154,7 +180,7 @@ export function UsageRingChart({
         height={size}
         viewBox={`0 0 ${size} ${size}`}
         // Rotate -90deg so the first slice starts at the top.
-        style={{ transform: "rotate(-90deg)" }}
+        style={{ transform: "rotate(-90deg)", overflow: "visible" }}
         role="img"
         aria-label={a11yLabel}
       >
@@ -188,16 +214,29 @@ export function UsageRingChart({
               strokeDasharray={`${length} ${circumference - length}`}
               strokeDashoffset={-offset}
               opacity={isDimmed ? 0.35 : 1}
+              // Slices are independently hoverable so mouse users get
+              // the same affordance whether they point at the chart
+              // or the legend.
+              onPointerEnter={() => setHoveredKey(slice.key)}
+              onPointerLeave={() => setHoveredKey(null)}
+              onFocus={() => setHoveredKey(slice.key)}
+              onBlur={() => setHoveredKey(null)}
+              tabIndex={0}
+              role="button"
+              aria-label={`${slice.label}: ${formatPercent((slice.totalTokens || 0) / (total || 1))}, ${formatTokens(slice.totalTokens)} tokens`}
+              aria-pressed={isHovered}
               style={{
                 transition: "opacity 120ms ease-out, stroke-width 120ms ease-out",
+                cursor: "pointer",
+                outline: "none",
               }}
-              aria-hidden
-              focusable={false}
             />
           );
         })}
       </svg>
-      {/* Center label sits on top of the SVG so it remains crisp. */}
+      {/* Center label sits on top of the SVG so it remains crisp.
+          `pointer-events: none` keeps it from swallowing hover events
+          intended for the underlying SVG slices. */}
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
         <div className="max-w-[70%] truncate text-[10px] uppercase tracking-wide text-muted-foreground">
           {centerLabel}
