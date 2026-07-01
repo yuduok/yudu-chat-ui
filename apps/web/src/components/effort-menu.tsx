@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { useChat } from "@/store/chat";
+import { useUiDefaults } from "@/store/ui-defaults";
 import { useI18n } from "@/i18n";
 import type { ReasoningEffort } from "@yudu/shared";
 import { cn } from "@/lib/utils";
@@ -65,9 +66,11 @@ export function EffortMenu() {
           <DropdownMenuItem
             key={o.id}
             onSelect={() =>
-              void updateConv(active.id, {
-                reasoningEffort: o.id === "null" ? null : o.id,
-              })
+              (() => {
+                const next = o.id === "null" ? null : (o.id as ReasoningEffort);
+                useUiDefaults.getState().setReasoningEffort(next);
+                void updateConv(active.id, { reasoningEffort: next });
+              })()
             }
             className="flex items-center justify-between gap-2"
           >

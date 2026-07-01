@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { ChatMessage, Conversation } from "@yudu/shared";
 import * as api from "@/lib/api";
+import { useUiDefaults } from "@/store/ui-defaults";
 
 // ---------- Activity panel (tool calls + agent orchestration) ----------
 
@@ -189,13 +190,18 @@ export const useChat = create<ChatState>((set, get) => ({
 
 
   async createConversation(init) {
+    // Inherit the user's last-picked defaults so a brand-new chat
+    // starts with the same provider / model / agent / reasoning-depth
+    // / show-thinking as their previous one, instead of silently
+    // dropping back to mock. Explicit `init` overrides win.
+    const ui = useUiDefaults.getState();
     const conv = await api.createConversation({
-      provider: init?.provider ?? "mock",
-      model: init?.model ?? "mock-1",
+      provider: init?.provider ?? ui.provider,
+      model: init?.model ?? ui.model,
       title: init?.title,
-      agentId: init?.agentId ?? null,
-      reasoningEffort: init?.reasoningEffort ?? null,
-      showThinking: init?.showThinking ?? true,
+      agentId: init?.agentId ?? ui.agentId ?? null,
+      reasoningEffort: init?.reasoningEffort ?? ui.reasoningEffort ?? null,
+      showThinking: init?.showThinking ?? ui.showThinking ?? true,
     });
     set((s) => ({
       conversations: [conv, ...s.conversations],

@@ -9,14 +9,15 @@ import {
 
 /**
  * Donut + side legend used by both the "By provider" and "By model"
- * sections of the Usage tab. Hovering a legend row or a slice keeps
+ * sections of the Usage tab. Hovering a legend row OR a slice keeps
  * the two in sync via shared hover state, so the focused slice grows
  * in the chart while its row in the legend is highlighted.
  *
- * Keyboard parity: legend rows are real focusable buttons so keyboard
- * users can step through buckets the same way mouse users hover them.
- * The SVG slices are aria-hidden because the legend already exposes
- * the same data; announcing both would double up.
+ * Keyboard parity: legend rows and donut slices are real focusable
+ * elements (buttons / focusable SVG circles) so keyboard users can
+ * step through buckets the same way mouse users hover them. The
+ * `aria-label` on the donut announces the focused bucket, so screen
+ * readers hear the same data without the legend having to repeat it.
  */
 export function UsageLegendChart({
   slices,
@@ -56,6 +57,8 @@ export function UsageLegendChart({
         thickness={16}
         centerTitle={centerTitle}
         centerValue={centerValue}
+        hoveredKey={hovered}
+        onHoverChange={setHovered}
         className="shrink-0"
       />
       <ul className="min-w-0 flex-1 space-y-1" role="list">
@@ -66,8 +69,8 @@ export function UsageLegendChart({
             <li key={s.key}>
               <button
                 type="button"
-                onMouseEnter={() => setHovered(s.key)}
-                onMouseLeave={() => setHovered(null)}
+                onPointerEnter={() => setHovered(s.key)}
+                onPointerLeave={() => setHovered(null)}
                 onFocus={() => setHovered(s.key)}
                 onBlur={() => setHovered(null)}
                 aria-pressed={isFocused}

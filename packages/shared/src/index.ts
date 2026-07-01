@@ -201,6 +201,13 @@ export interface UsageBucket {
   completionTokens: number;
   totalTokens: number;
   messageCount: number;
+  /**
+   * Set when this row aggregates multiple provider/model pairs. Only
+   * populated on the `byModel` report — e.g. `["openai", "azure"]` for
+   * a `gpt-4o` bucket that came in via two routes. Sorted + de-duped.
+   * Absent on rows that come from a single provider.
+   */
+  providers?: string[];
 }
 
 export interface UsageReport {
