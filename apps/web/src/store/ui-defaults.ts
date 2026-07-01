@@ -24,6 +24,13 @@ export interface UiDefaults {
   agentId: string | null;
   reasoningEffort: ReasoningEffort | null;
   showThinking: boolean;
+  /**
+   * Whether the composer "use tools" switch is on. Like
+   * showThinking, this is a global preference: the user picks it
+   * once and every tab / new conversation inherits it. Persisted
+   * to localStorage so it survives a reload.
+   */
+  useTools: boolean;
 }
 
 const STORAGE_KEY = "yudu-ui-defaults";
@@ -34,6 +41,7 @@ const SEED: UiDefaults = {
   agentId: null,
   reasoningEffort: null,
   showThinking: true,
+  useTools: false,
 };
 
 function readPersisted(): UiDefaults {
@@ -59,6 +67,8 @@ function readPersisted(): UiDefaults {
           : SEED.reasoningEffort,
       showThinking:
         typeof parsed.showThinking === "boolean" ? parsed.showThinking : SEED.showThinking,
+      useTools:
+        typeof parsed.useTools === "boolean" ? parsed.useTools : SEED.useTools,
     };
   } catch {
     return SEED;
@@ -81,6 +91,7 @@ interface UiDefaultsState extends UiDefaults {
   setAgentId: (a: string | null) => void;
   setReasoningEffort: (e: ReasoningEffort | null) => void;
   setShowThinking: (v: boolean) => void;
+  setUseTools: (v: boolean) => void;
   /** Bulk-apply from an existing conversation (e.g. on import). */
   hydrate: (next: Partial<UiDefaults>) => void;
 }
@@ -105,6 +116,10 @@ export const useUiDefaults = create<UiDefaultsState>((set, get) => ({
   },
   setShowThinking(v) {
     set({ showThinking: v });
+    writePersisted(get());
+  },
+  setUseTools(v) {
+    set({ useTools: v });
     writePersisted(get());
   },
   hydrate(next) {
