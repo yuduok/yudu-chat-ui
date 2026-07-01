@@ -42,7 +42,11 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
   const showThinking = active?.showThinking !== false;
 
   const [value, setValue] = useState("");
-  const [useTools, setUseTools] = useState(false);
+  // useTools is a *global* composer preference (alongside provider /
+  // model / showThinking): the user picks it once and every tab /
+  // new conversation inherits it. Persisted to localStorage so it
+  // survives a reload.
+  const useTools = useUiDefaults((s) => s.useTools);
   const ref = useRef<HTMLTextAreaElement>(null);
 
   // Auto-resize
@@ -168,7 +172,7 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
             <Switch
               id="composer-use-tools"
               checked={useTools}
-              onCheckedChange={setUseTools}
+              onCheckedChange={(v) => useUiDefaults.getState().setUseTools(v)}
               disabled={streaming}
               aria-label={t("composer.runWithTools")}
             />
