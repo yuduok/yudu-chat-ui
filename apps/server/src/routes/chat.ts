@@ -1,11 +1,11 @@
 import type { FastifyInstance } from "fastify";
-import { eq, asc } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "../db/index.js";
 import { conversations, messages } from "../db/schema.js";
 import { getProvider } from "../providers/registry.js";
 import { getProviderSetting } from "./settings.js";
-import { getAgent, listAgents } from "../agents/index.js";
+import { getAgent } from "../agents/index.js";
 import { listTools, runTool } from "../tools/index.js";
 import { getEnabledSkillsPrompt } from "../skills/index.js";
 import { getAllSettings } from "./settings.js";
@@ -29,6 +29,7 @@ function sseReply(reply: any) {
   reply.raw.setHeader("Connection", "keep-alive");
   reply.raw.setHeader("X-Accel-Buffering", "no");
   reply.hijack();
+  reply.raw.flushHeaders();
   return reply.raw;
 }
 
@@ -88,11 +89,6 @@ function parseArgs(args: Record<string, unknown> | string): Record<string, unkno
   }
 }
 
-function serializeArgs(args: Record<string, unknown> | string): string {
-  if (typeof args === "string") return args;
-  return JSON.stringify(args);
-}
-
 function withSkills(systemPrompt: string | null | undefined): string | undefined {
   if (!getAllSettings().skills.enabled) return systemPrompt ?? undefined;
   const skillsPrompt = getEnabledSkillsPrompt();
@@ -145,90 +141,175 @@ function pickTools(opts: {
   return listTools().filter((t) => wantNames.has(t.name));
 }
 
-async function persistAssistant(
-  conv: { id: string },
-  assistantMsg: ChatMessage,
-  content: string,
-  toolCallIds: string[],
-  promptTokens: number,
-  completionTokens: number,
-  agentId: string,
-  label: string,
-  stream: NodeJS.WritableStream,
-) {
-  // Persist the assistant message (this happens once per "real" turn).
-  // We update the row in place; the row was inserted as a placeholder
-  // by the caller.
-  await db
-    .update(messages)
-    .set({
-      content,
-      toolCallIds: toolCallIds.length ? JSON.stringify(toolCallIds) : null,
-      promptTokens,
-      completionTokens,
-    })
-    .where(eq(messages.id, assistantMsg.id));
-  await db
-    .update(conversations)
-    .set({ updatedAt: Date.now() })
-    .where(eq(conversations.id, conv.id));
+const conversationLocks = new Map<string, Promise<void>>();
+const chatRequestControllers = new Map<string, AbortController>();
+const cancelledChatRequestIds = new Map<string, number>();
 
-  sendSse(stream, { type: "usage", promptTokens, completionTokens });
-  sendSse(stream, {
-    type: "message",
-    message: {
-      ...assistantMsg,
-      content,
-      toolCallIds: toolCallIds.length ? toolCallIds : null,
-      promptTokens,
-      completionTokens,
-    },
+function pruneCancelledChatRequests(now = Date.now()): void {
+  for (const [requestId, cancelledAt] of cancelledChatRequestIds) {
+    if (now - cancelledAt > 60_000) cancelledChatRequestIds.delete(requestId);
+  }
+}
+
+function unregisterChatRequest(requestId: string | null, controller: AbortController): void {
+  if (requestId && chatRequestControllers.get(requestId) === controller) {
+    chatRequestControllers.delete(requestId);
+  }
+}
+
+async function acquireConversationLock(conversationId: string): Promise<() => void> {
+  const previous = conversationLocks.get(conversationId) ?? Promise.resolve();
+  let openGate!: () => void;
+  const gate = new Promise<void>((resolve) => { openGate = resolve; });
+  const tail = previous.then(() => gate);
+  conversationLocks.set(conversationId, tail);
+  await previous;
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    openGate();
+    void tail.finally(() => {
+      if (conversationLocks.get(conversationId) === tail) {
+        conversationLocks.delete(conversationId);
+      }
+    });
+  };
+}
+
+async function insertMessage(message: ChatMessage): Promise<void> {
+  await db.insert(messages).values(messageInsertValues(message));
+}
+
+function messageInsertValues(message: ChatMessage): typeof messages.$inferInsert {
+  return {
+    id: message.id,
+    conversationId: message.conversationId,
+    role: message.role,
+    content: message.content,
+    parts: message.parts?.length ? JSON.stringify(message.parts) : null,
+    toolCallIds: message.toolCallIds?.length ? JSON.stringify(message.toolCallIds) : null,
+    promptTokens: message.promptTokens ?? null,
+    completionTokens: message.completionTokens ?? null,
+    createdAt: message.createdAt,
+  };
+}
+
+async function restoreMessageTail(opts: {
+  conversationId: string;
+  anchorId: string;
+  includeAnchor: boolean;
+  originalRows: Array<typeof messages.$inferSelect>;
+  conversation: { title: string; updatedAt: number };
+}): Promise<void> {
+  const current = await db
+    .select()
+    .from(messages)
+    .where(eq(messages.conversationId, opts.conversationId))
+    .orderBy(asc(messages.createdAt));
+  const anchorIndex = current.findIndex((row) => row.id === opts.anchorId);
+  if (anchorIndex < 0) {
+    throw new Error("cannot restore chat history because its anchor message is missing");
+  }
+  const deleteFrom = opts.includeAnchor ? anchorIndex : anchorIndex + 1;
+  const currentTailIds = current.slice(deleteFrom).map((row) => row.id);
+
+  db.transaction((tx) => {
+    if (currentTailIds.length) {
+      tx.delete(messages).where(inArray(messages.id, currentTailIds)).run();
+    }
+    if (opts.originalRows.length) {
+      tx.insert(messages).values(opts.originalRows).run();
+    }
+    tx.update(conversations)
+      .set({ title: opts.conversation.title, updatedAt: opts.conversation.updatedAt })
+      .where(eq(conversations.id, opts.conversationId))
+      .run();
   });
-  sendSse(stream, { type: "agent_finished", agentId, label });
-  sendSse(stream, { type: "done" });
+}
+
+function providerHistoryFromMessages(history: ChatMessage[]): ProviderMessage[] {
+  const normalized: ChatMessage[] = [];
+
+  for (let index = 0; index < history.length; index += 1) {
+    const message = history[index];
+    if (message.role === "tool") {
+      // Orphaned tool results can exist in legacy/imported histories. Sending
+      // them upstream would make both OpenAI and Anthropic reject the turn.
+      continue;
+    }
+
+    const callIds = message.role === "assistant"
+      ? new Set(message.toolCallIds ?? message.parts
+        ?.filter((part): part is ToolCallPart => part.type === "tool_call")
+        .map((part) => part.id) ?? [])
+      : new Set<string>();
+    if (callIds.size === 0) {
+      normalized.push(message);
+      continue;
+    }
+
+    const toolResults: ChatMessage[] = [];
+    let cursor = index + 1;
+    while (cursor < history.length && history[cursor].role === "tool") {
+      toolResults.push(history[cursor]);
+      cursor += 1;
+    }
+    const resultIds = new Set(
+      toolResults.flatMap((toolMessage) =>
+        (toolMessage.parts ?? [])
+          .filter((part): part is ToolResultPart => part.type === "tool_result")
+          .map((part) => part.toolCallId),
+      ),
+    );
+
+    // A tool-use turn is an atomic protocol group. Drop an incomplete legacy
+    // group rather than forwarding a dangling tool_use/tool_result upstream.
+    if ([...callIds].every((id) => resultIds.has(id))) {
+      normalized.push(message);
+      normalized.push(...toolResults.filter((toolMessage) =>
+        (toolMessage.parts ?? []).some(
+          (part) => part.type === "tool_result" && callIds.has(part.toolCallId),
+        ),
+      ));
+    }
+    index = cursor - 1;
+  }
+
+  return normalized
+    .filter((message) => message.role !== "system")
+    .map(messageToProvider);
+}
+
+function abortError(): Error {
+  const error = new Error("aborted");
+  error.name = "AbortError";
+  return error;
 }
 
 async function runAgentTurn(opts: {
-  // Static context
-  convRow: typeof conversations.$inferSelect;
-  agent: AgentProfile | null;
+  conversationId: string;
   tools: ToolDefinition[];
-  // Mutable working state
-  workingHistory: ChatMessage[];
   workingProviderMessages: ProviderMessage[];
-  // The "current" placeholder assistant message that the stream will mutate.
-  assistantMsg: ChatMessage;
-  // The "label" / "agentId" that the UI shows for attribution.
   agentId: string;
   label: string;
-  // Stream handles
   stream: NodeJS.WritableStream;
-  // Abort signal wired to the client connection.
   signal: AbortSignal;
-  // The setting object (api key, base url) for the provider actually
-  // being used for this turn (may be overridden by the agent).
   setting: { apiKey: string | null | undefined; baseUrl?: string | undefined };
-  // The provider to use for this turn.
   providerId: string;
   model: string;
   systemPrompt: string | null | undefined;
   temperature: number;
-  // Reasoning controls forwarded to the provider. `showThinking` only
-  // gates the SSE channel; the server still collects + persists reasoning
-  // deltas so toggling the UI later doesn't lose history.
   reasoningEffort?: "low" | "medium" | "high" | "xhigh";
   showThinking?: boolean;
-  // When true, this is the last agent in a chain — its text response
-  // becomes the user-visible assistant message and is committed to the
-  // conversation.
   isFinal: boolean;
-}): Promise<{ content: string; toolCallIds: string[]; usage: { p: number; c: number } }> {
+  nextCreatedAt: () => number;
+}): Promise<{ content: string; message: ChatMessage; usage: { p: number; c: number } }> {
   const {
-    agent,
+    conversationId,
     tools,
-    workingHistory,
     workingProviderMessages,
-    assistantMsg,
     agentId,
     label,
     stream,
@@ -241,6 +322,7 @@ async function runAgentTurn(opts: {
     reasoningEffort,
     showThinking = true,
     isFinal,
+    nextCreatedAt,
   } = opts;
 
   const provider = getProvider(providerId);
@@ -253,16 +335,27 @@ async function runAgentTurn(opts: {
 
   sendSse(stream, { type: "agent_started", agentId, label });
 
-  let acc = "";
-  let accReasoning = "";
+  const allowedToolNames = new Set(tools.map((tool) => tool.name));
   let promptTokens = 0;
   let completionTokens = 0;
-  const collectedToolCalls: Array<{ id: string; name: string; arguments: Record<string, unknown> | string }> = [];
-  const allowedToolNames = new Set(tools.map((tool) => tool.name));
+  let toolRounds = 0;
 
-  // Loop: first iteration uses the prompt as-is, subsequent iterations
-  // run any tool calls and re-feed the model with results.
-  for (let round = 0; round < MAX_TOOL_ROUNDS + 1; round++) {
+  while (true) {
+    if (signal.aborted) throw abortError();
+    let roundText = "";
+    let roundReasoning = "";
+    let roundPromptTokens = 0;
+    let roundCompletionTokens = 0;
+    const collectedToolCalls: Array<{
+      id: string;
+      name: string;
+      arguments: Record<string, unknown> | string;
+    }> = [];
+    // After the tool budget is exhausted, make one final synthesis request
+    // without advertising tools. This guarantees we never persist a dangling
+    // tool_call that the server deliberately refuses to execute.
+    const advertisedTools = toolRounds < MAX_TOOL_ROUNDS ? tools : [];
+
     for await (const chunk of provider.chat({
       model,
       systemPrompt: systemPrompt ?? undefined,
@@ -271,18 +364,17 @@ async function runAgentTurn(opts: {
       signal,
       apiKey: setting.apiKey ?? "",
       baseUrl: setting.baseUrl,
-      tools: tools.length ? tools : undefined,
-      toolChoice: tools.length ? "auto" : undefined,
+      tools: advertisedTools.length ? advertisedTools : undefined,
+      toolChoice: advertisedTools.length ? "auto" : "none",
       reasoningEffort,
     })) {
       if (chunk.delta) {
-        acc += chunk.delta;
-        // Only the final agent's text deltas reach the user.
+        roundText += chunk.delta;
         if (isFinal) sendSse(stream, { type: "delta", text: chunk.delta });
       }
       if (chunk.usage) {
-        promptTokens = chunk.usage.promptTokens;
-        completionTokens = chunk.usage.completionTokens;
+        roundPromptTokens = chunk.usage.promptTokens;
+        roundCompletionTokens = chunk.usage.completionTokens;
       }
       if (chunk.toolCall) {
         collectedToolCalls.push({
@@ -293,9 +385,7 @@ async function runAgentTurn(opts: {
         sendSse(stream, { type: "tool_call", call: chunk.toolCall });
       }
       if (chunk.reasoningDelta) {
-        accReasoning += chunk.reasoningDelta;
-        // Gate only the SSE channel; we keep accumulating so the part can
-        // be persisted on the assistant message.
+        roundReasoning += chunk.reasoningDelta;
         if (showThinking) {
           sendSse(stream, {
             type: "reasoning_delta",
@@ -313,411 +403,480 @@ async function runAgentTurn(opts: {
       }
     }
 
-    if (collectedToolCalls.length === 0) break;
-    if (round >= MAX_TOOL_ROUNDS) {
-      // Out of budget — append the tool calls and let the final agent
-      // synthesise without further tool calls. We do this by zeroing out
-      // the tool list and breaking out of the loop with the partial text.
-      break;
-    }
+    // Some adapters stop their async generator cleanly when aborted instead
+    // of throwing. Do not mistake that graceful return for a complete model
+    // response and persist a partial text/reasoning assistant message.
+    if (signal.aborted) throw abortError();
 
-    // Build the assistant message parts (with tool_calls) and persist.
-    const assistantParts: ContentPart[] = [
-      ...(accReasoning
-        ? [{ type: "reasoning", text: accReasoning } as ContentPart]
-        : []),
-      ...(acc ? [{ type: "text", text: acc } as ContentPart] : []),
-      ...collectedToolCalls.map(
-        (c): ToolCallPart => ({
-          type: "tool_call",
-          id: c.id,
-          name: c.name,
-          arguments: c.arguments,
-        }),
-      ),
-    ];
-    const toolCallIds = collectedToolCalls.map((c) => c.id);
+    promptTokens += roundPromptTokens;
+    completionTokens += roundCompletionTokens;
 
-    // Persist the assistant message and reflect it in the working history.
-    if (isFinal) {
-      // The user-visible assistant message keeps the text the model
-      // emitted *before* the tool calls, plus the tool call chips.
-      await db
-        .update(messages)
-        .set({
-          content: acc,
-          parts: JSON.stringify(assistantParts),
-          toolCallIds: JSON.stringify(toolCallIds),
-          promptTokens,
-          completionTokens,
-        })
-        .where(eq(messages.id, assistantMsg.id));
-      workingHistory.push({
-        ...assistantMsg,
-        content: acc,
-        parts: assistantParts,
-        toolCallIds,
-        promptTokens,
-        completionTokens,
-      });
-    } else {
-      // Intermediate agent: don't surface this turn as a user-visible
-      // message. We still need the provider history to see the calls.
-      const synthetic: ChatMessage = {
-        ...assistantMsg,
-        content: acc,
-        parts: assistantParts,
-        toolCallIds,
-        promptTokens,
-        completionTokens,
-      };
-      workingHistory.push(synthetic);
-    }
-
-    // Run each tool call and feed the results back.
-    for (const call of collectedToolCalls) {
-      let result: { content: string; isError?: boolean };
-      if (!allowedToolNames.has(call.name)) {
-        result = { content: `tool '${call.name}' is not authorized for this turn`, isError: true };
-      } else try {
-        result = await runTool(call.name, parseArgs(call.arguments), { signal });
-      } catch (err: any) {
-        result = { content: err?.message ?? String(err), isError: true };
+    if (collectedToolCalls.length > 0) {
+      if (advertisedTools.length === 0) {
+        throw new Error("Provider emitted a tool call after tools were disabled");
       }
-      const resultPart: ToolResultPart = {
-        type: "tool_result",
-        toolCallId: call.id,
-        content: result.content,
-        isError: result.isError,
-        agentId,
-      };
-      // Persist the tool result as a new message row.
-      const toolMsg: ChatMessage = {
+      const toolCallIds = collectedToolCalls.map((call) => call.id);
+      const assistantParts: ContentPart[] = [
+        ...(roundReasoning ? [{ type: "reasoning", text: roundReasoning } as ContentPart] : []),
+        ...(roundText ? [{ type: "text", text: roundText } as ContentPart] : []),
+        ...collectedToolCalls.map(
+          (call): ToolCallPart => ({
+            type: "tool_call",
+            id: call.id,
+            name: call.name,
+            arguments: call.arguments,
+          }),
+        ),
+      ];
+      const toolCallMessage: ChatMessage = {
         id: nanoid(),
-        conversationId: assistantMsg.conversationId,
-        role: "tool",
-        content: result.content,
-        parts: [resultPart],
-        createdAt: Date.now(),
+        conversationId,
+        role: "assistant",
+        content: roundText,
+        parts: assistantParts,
+        toolCallIds,
+        promptTokens: roundPromptTokens,
+        completionTokens: roundCompletionTokens,
+        createdAt: nextCreatedAt(),
       };
+      const toolMessages: ChatMessage[] = [];
+
+      for (const call of collectedToolCalls) {
+        if (signal.aborted) throw abortError();
+        let result: { content: string; isError?: boolean };
+        if (!allowedToolNames.has(call.name)) {
+          result = { content: `tool '${call.name}' is not authorized for this turn`, isError: true };
+        } else {
+          result = await runTool(call.name, parseArgs(call.arguments), { signal });
+        }
+        const resultPart: ToolResultPart = {
+          type: "tool_result",
+          toolCallId: call.id,
+          content: result.content,
+          isError: result.isError,
+          agentId,
+        };
+        const toolMessage: ChatMessage = {
+          id: nanoid(),
+          conversationId,
+          role: "tool",
+          content: result.content,
+          parts: [resultPart],
+          toolCallIds: null,
+          promptTokens: null,
+          completionTokens: null,
+          createdAt: nextCreatedAt(),
+        };
+        toolMessages.push(toolMessage);
+      }
+
       if (isFinal) {
-        await db.insert(messages).values({
-          id: toolMsg.id,
-          conversationId: toolMsg.conversationId,
-          role: toolMsg.role,
-          content: toolMsg.content,
-          parts: JSON.stringify(toolMsg.parts),
-          createdAt: toolMsg.createdAt,
+        // Persist the assistant tool_use and every matching tool_result as one
+        // transaction. An abort between tools can no longer leave a history
+        // suffix that real providers reject on the next request.
+        db.transaction((tx) => {
+          tx.insert(messages)
+            .values([toolCallMessage, ...toolMessages].map(messageInsertValues))
+            .run();
         });
       }
-      workingHistory.push(toolMsg);
-      // Provider-side message: tool_result part + tool_use call.
-      const providerMsg = messageToProvider(toolMsg);
-      workingProviderMessages.push(providerMsg);
 
-      sendSse(stream, {
-        type: "tool_result",
-        toolCallId: call.id,
-        agentId,
-        content: result.content,
-        isError: result.isError,
-      });
+      // The assistant/tool_use turn must precede every tool_result in both
+      // provider memory and persisted history.
+      workingProviderMessages.push(messageToProvider(toolCallMessage));
+      for (const toolMessage of toolMessages) {
+        workingProviderMessages.push(messageToProvider(toolMessage));
+        const resultPart = toolMessage.parts?.find(
+          (part): part is ToolResultPart => part.type === "tool_result",
+        );
+        if (!resultPart) continue;
+        sendSse(stream, {
+          type: "tool_result",
+          toolCallId: resultPart.toolCallId,
+          agentId,
+          content: resultPart.content,
+          isError: resultPart.isError,
+        });
+      }
+      toolRounds += 1;
+      continue;
     }
 
-    // Reset accumulators for the second iteration (model will see the
-    // tool results and produce a final answer). We deliberately keep the
-    // reasoning accumulator between rounds so the persisted part still
-    // captures the model's full thinking session.
-    acc = "";
-    collectedToolCalls.length = 0;
-  }
-
-  // Persist the final assistant turn once the loop is done. Without this
-  // a plain text-only reply (no tool calls) leaves the placeholder row
-  // empty in the DB. Intermediate agents don't write to the user-visible
-  // row; the final agent in the chain does.
-  if (isFinal && (acc || accReasoning || promptTokens || completionTokens)) {
+    if (!roundText && !roundReasoning) {
+      throw new Error("Provider returned an empty response");
+    }
     const finalParts: ContentPart[] = [
-      ...(accReasoning ? [{ type: "reasoning", text: accReasoning } as ContentPart] : []),
-      ...(acc ? [{ type: "text", text: acc } as ContentPart] : []),
+      ...(roundReasoning ? [{ type: "reasoning", text: roundReasoning } as ContentPart] : []),
+      ...(roundText ? [{ type: "text", text: roundText } as ContentPart] : []),
     ];
-    await db
-      .update(messages)
-      .set({
-        content: acc,
-        parts: finalParts.length ? JSON.stringify(finalParts) : null,
-        promptTokens,
-        completionTokens,
-      })
-      .where(eq(messages.id, assistantMsg.id));
-    sendSse(stream, { type: "usage", promptTokens, completionTokens });
-    sendSse(stream, {
-      type: "message",
-      message: {
-        ...assistantMsg,
-        content: acc,
-        parts: finalParts,
-        promptTokens,
-        completionTokens,
-      },
-    });
+    const finalMessage: ChatMessage = {
+      id: nanoid(),
+      conversationId,
+      role: "assistant",
+      content: roundText,
+      parts: finalParts.length ? finalParts : null,
+      toolCallIds: null,
+      // Each persisted assistant row owns only its provider request's usage.
+      // The SSE usage event below reports the aggregate across tool rounds.
+      promptTokens: roundPromptTokens,
+      completionTokens: roundCompletionTokens,
+      createdAt: nextCreatedAt(),
+    };
+    if (isFinal) {
+      await insertMessage(finalMessage);
+      await db
+        .update(conversations)
+        .set({ updatedAt: Date.now() })
+        .where(eq(conversations.id, conversationId));
+      sendSse(stream, { type: "usage", promptTokens, completionTokens });
+      sendSse(stream, { type: "message", message: finalMessage });
+    }
+    workingProviderMessages.push(messageToProvider(finalMessage));
     sendSse(stream, { type: "agent_finished", agentId, label });
-    sendSse(stream, { type: "done" });
+    return {
+      content: roundText,
+      message: finalMessage,
+      usage: { p: promptTokens, c: completionTokens },
+    };
   }
-
-  return {
-    content: acc,
-    toolCallIds: collectedToolCalls.map((c) => c.id),
-    usage: { p: promptTokens, c: completionTokens },
-  };
 }
 
 export async function chatRoutes(app: FastifyInstance) {
+  app.post<{ Body: { requestId?: string } }>("/api/chat/cancel", async (req, reply) => {
+    const requestId = req.body?.requestId;
+    if (typeof requestId !== "string" || !requestId.trim() || requestId.length > 128) {
+      return reply.code(400).send({ error: "valid requestId required" });
+    }
+    pruneCancelledChatRequests();
+    const active = chatRequestControllers.get(requestId);
+    if (active) active.abort();
+    else cancelledChatRequestIds.set(requestId, Date.now());
+    return { ok: true, active: Boolean(active) };
+  });
+
   app.post<{ Body: ChatRequest }>("/api/chat", async (req, reply) => {
     const body = req.body;
     if (!body?.conversationId) {
       return reply.code(400).send({ error: "conversationId required" });
     }
+    const editing = typeof body.editMessageId === "string" || body.editLastUser === true;
+    if (body.regenerate && editing) {
+      return reply.code(400).send({ error: "regenerate cannot be combined with edit" });
+    }
+    if (
+      body.editMessageId !== undefined &&
+      (typeof body.editMessageId !== "string" || !body.editMessageId.trim())
+    ) {
+      return reply.code(400).send({ error: "editMessageId must not be empty" });
+    }
+    if (
+      body.requestId !== undefined &&
+      (typeof body.requestId !== "string" || !body.requestId.trim() || body.requestId.length > 128)
+    ) {
+      return reply.code(400).send({ error: "requestId must be a non-empty string" });
+    }
 
-    const [conv] = await db
-      .select()
+    // Preserve normal HTTP validation errors before committing the response
+    // to SSE. The same state is checked again after the lock because another
+    // queued turn may change it in between.
+    const [preflightConversation] = await db
+      .select({ id: conversations.id })
       .from(conversations)
       .where(eq(conversations.id, body.conversationId));
-    if (!conv) return reply.code(404).send({ error: "Conversation not found" });
-
-    const agent = conv.agentId ? getAgent(conv.agentId) ?? null : null;
-    const useTools = body.useTools === true;
-
-    const providerId = agent?.provider ?? conv.provider;
-    const model = agent?.model ?? conv.model;
-    const systemPrompt = withSkills(agent?.systemPrompt ?? conv.systemPrompt ?? undefined);
-    const temperature = agent?.temperature ?? conv.temperature ?? 0.7;
-    // Reasoning effort: per-turn override > agent > conversation > null.
-    const allowedEfforts = ["low", "medium", "high", "xhigh"] as const;
-    type Effort = (typeof allowedEfforts)[number];
-    const resolveEffort = (v: unknown): Effort | undefined =>
-      typeof v === "string" && (allowedEfforts as readonly string[]).includes(v)
-        ? (v as Effort)
-        : undefined;
-    const reasoningEffort =
-      resolveEffort(body.reasoningEffort) ??
-      resolveEffort(agent?.reasoningEffort) ??
-      resolveEffort(conv.reasoningEffort);
-    // showThinking: default true. The flag controls only the SSE channel;
-    // reasoning deltas are still collected + persisted server-side so the
-    // UI can flip the toggle without losing history.
-    const showThinking =
-      body.showThinking ?? agent?.showThinking ?? conv.showThinking ?? true;
-    const tools = pickTools({ agent, useTools, providerId });
-    const setting = getProviderSetting(providerId);
-
-    // Load existing messages
-    const existing = await db
-      .select()
-      .from(messages)
-      .where(eq(messages.conversationId, conv.id))
-      .orderBy(asc(messages.createdAt));
-    let working: ChatMessage[] = existing.map(rowToMessage);
-
-    // Handle edit-last-user: update the last user message in place.
-    while (working.length && working[working.length - 1].role === "assistant") {
-      const dropped = working.pop()!;
-      await db.delete(messages).where(eq(messages.id, dropped.id));
+    if (!preflightConversation) {
+      return reply.code(404).send({ error: "Conversation not found" });
     }
-
-    if (body.editLastUser && working.length && working[working.length - 1].role === "user") {
-      const last = working[working.length - 1];
-      const newContent = body.content ?? "";
-      const newParts = body.parts ?? null;
-      await db
-        .update(messages)
-        .set({
-          content: newContent,
-          parts: newParts ? JSON.stringify(newParts) : null,
-        })
-        .where(eq(messages.id, last.id));
-      last.content = newContent;
-      last.parts = newParts;
-    } else if (body.regenerate) {
-      // nothing to do
-    } else {
-      const userMsg: ChatMessage = {
-        id: nanoid(),
-        conversationId: conv.id,
-        role: "user",
-        content: body.content ?? "",
-        parts: body.parts ?? null,
-        createdAt: Date.now(),
-      };
-      await db.insert(messages).values({
-        id: userMsg.id,
-        conversationId: userMsg.conversationId,
-        role: userMsg.role,
-        content: userMsg.content,
-        parts: userMsg.parts ? JSON.stringify(userMsg.parts) : null,
-        createdAt: userMsg.createdAt,
-      });
-      working.push(userMsg);
-    }
-
-    if (conv.title === "New Chat") {
-      const firstUser = working.find((m) => m.role === "user");
-      if (firstUser) {
-        const t = firstUser.content.slice(0, 40) || "New Chat";
-        await db
-          .update(conversations)
-          .set({ title: t, updatedAt: Date.now() })
-          .where(eq(conversations.id, conv.id));
+    if (editing || body.regenerate) {
+      const preflightMessages = await db
+        .select({ id: messages.id, role: messages.role })
+        .from(messages)
+        .where(eq(messages.conversationId, body.conversationId))
+        .orderBy(asc(messages.createdAt));
+      if (editing) {
+        const editable = typeof body.editMessageId === "string"
+          ? preflightMessages.some(
+            (message) => message.id === body.editMessageId && message.role === "user",
+          )
+          : preflightMessages.some((message) => message.role === "user");
+        if (!editable) {
+          return reply.code(404).send({ error: "Editable user message not found" });
+        }
+      } else if (!preflightMessages.some((message) => message.role === "user")) {
+        return reply.code(400).send({ error: "Cannot regenerate without a user message" });
       }
-    } else {
-      await db
-        .update(conversations)
-        .set({ updatedAt: Date.now() })
-        .where(eq(conversations.id, conv.id));
     }
 
-    const stream = sseReply(reply);
+    // Install disconnect listeners before waiting for the per-conversation
+    // lock. Otherwise a queued request can be cancelled by the client, miss
+    // the event entirely, and still mutate history once it reaches the front.
     const ac = new AbortController();
-    req.raw.on("close", () => ac.abort());
+    const requestId = typeof body.requestId === "string" ? body.requestId : null;
+    if (requestId) {
+      pruneCancelledChatRequests();
+      chatRequestControllers.get(requestId)?.abort();
+      chatRequestControllers.set(requestId, ac);
+      if (cancelledChatRequestIds.delete(requestId)) ac.abort();
+    }
+    const abort = () => ac.abort();
+    const abortOnClose = () => {
+      if (!reply.raw.writableEnded) ac.abort();
+    };
+    req.raw.once("aborted", abort);
+    reply.raw.once("close", abortOnClose);
 
-    (async () => {
-      try {
-        // The placeholder assistant message is created once. If the agent
-        // chain runs multiple agents, the *final* agent's text lands here.
-        // Intermediate agents emit their text into the SSE stream but
-        // don't write to this row.
-        const assistantMsg: ChatMessage = {
+    // Commit and flush the SSE response before joining the lock queue. A
+    // browser can then cancel the queued response stream, which gives the
+    // server an observable close event before any history is mutated.
+    const stream = sseReply(reply);
+    stream.write(": queued\n\n");
+    const releaseLock = await acquireConversationLock(body.conversationId);
+    let streamOwnsLock = false;
+    let rollbackMutation: (() => Promise<void>) | null = null;
+    try {
+      // IncomingMessage.destroyed becomes true after Fastify consumes a
+      // perfectly healthy JSON body, so it is not a disconnect signal here.
+      if (ac.signal.aborted || req.raw.aborted || reply.raw.destroyed) {
+        if (!stream.writableEnded) stream.end();
+        return reply;
+      }
+      const [conv] = await db
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, body.conversationId));
+      if (!conv) {
+        sendSse(stream, { type: "error", message: "Conversation not found" });
+        stream.end();
+        return reply;
+      }
+
+      const existing = await db
+        .select()
+        .from(messages)
+        .where(eq(messages.conversationId, conv.id))
+        .orderBy(asc(messages.createdAt));
+      let working: ChatMessage[] = existing.map(rowToMessage);
+      let lastCreatedAt = working.reduce((max, message) => Math.max(max, message.createdAt), Date.now());
+      const nextCreatedAt = () => {
+        lastCreatedAt = Math.max(Date.now(), lastCreatedAt + 1);
+        return lastCreatedAt;
+      };
+
+      if (editing) {
+        const targetIndex = typeof body.editMessageId === "string"
+          ? working.findIndex((message) => message.id === body.editMessageId && message.role === "user")
+          : working.map((message) => message.role).lastIndexOf("user");
+        if (targetIndex < 0) {
+          sendSse(stream, { type: "error", message: "Editable user message not found" });
+          stream.end();
+          return reply;
+        }
+        const target = working[targetIndex];
+        const originalTail = existing.slice(targetIndex);
+        rollbackMutation = () => restoreMessageTail({
+          conversationId: conv.id,
+          anchorId: target.id,
+          includeAnchor: true,
+          originalRows: originalTail,
+          conversation: { title: conv.title, updatedAt: conv.updatedAt },
+        });
+        const truncatedIds = working.slice(targetIndex + 1).map((message) => message.id);
+        const nextContent = body.content ?? target.content;
+        const nextParts = body.parts !== undefined ? body.parts : target.parts ?? null;
+        db.transaction((tx) => {
+          if (truncatedIds.length) {
+            tx.delete(messages).where(inArray(messages.id, truncatedIds)).run();
+          }
+          tx.update(messages)
+            .set({
+              content: nextContent,
+              parts: nextParts?.length ? JSON.stringify(nextParts) : null,
+            })
+            .where(and(eq(messages.id, target.id), eq(messages.conversationId, conv.id)))
+            .run();
+        });
+        working = [
+          ...working.slice(0, targetIndex),
+          { ...target, content: nextContent, parts: nextParts },
+        ];
+      } else if (body.regenerate) {
+        const lastUserIndex = working.map((message) => message.role).lastIndexOf("user");
+        if (lastUserIndex < 0) {
+          sendSse(stream, { type: "error", message: "Cannot regenerate without a user message" });
+          stream.end();
+          return reply;
+        }
+        const anchor = working[lastUserIndex];
+        const originalSuffix = existing.slice(lastUserIndex + 1);
+        rollbackMutation = () => restoreMessageTail({
+          conversationId: conv.id,
+          anchorId: anchor.id,
+          includeAnchor: false,
+          originalRows: originalSuffix,
+          conversation: { title: conv.title, updatedAt: conv.updatedAt },
+        });
+        const truncatedIds = working.slice(lastUserIndex + 1).map((message) => message.id);
+        if (truncatedIds.length) {
+          await db.delete(messages).where(inArray(messages.id, truncatedIds));
+        }
+        working = working.slice(0, lastUserIndex + 1);
+      } else {
+        const userMessage: ChatMessage = {
           id: nanoid(),
           conversationId: conv.id,
-          role: "assistant",
-          content: "",
-          parts: null,
+          role: "user",
+          content: body.content ?? "",
+          parts: body.parts ?? null,
           toolCallIds: null,
           promptTokens: null,
           completionTokens: null,
-          createdAt: Date.now(),
+          createdAt: nextCreatedAt(),
         };
-        await db.insert(messages).values({
-          id: assistantMsg.id,
-          conversationId: assistantMsg.conversationId,
-          role: assistantMsg.role,
-          content: "",
-          parts: null,
-          toolCallIds: null,
-          createdAt: assistantMsg.createdAt,
-        });
+        await insertMessage(userMessage);
+        working.push(userMessage);
+      }
 
-        const baseWorking = working.slice();
-        const baseProviderMessages: ProviderMessage[] = baseWorking
-          .filter((m) => m.role !== "system")
-          .map(messageToProvider);
+      const conversationPatch: { updatedAt: number; title?: string } = { updatedAt: Date.now() };
+      if (conv.title === "New Chat") {
+        const firstUser = working.find((message) => message.role === "user");
+        if (firstUser) conversationPatch.title = firstUser.content.slice(0, 40) || "New Chat";
+      }
+      await db
+        .update(conversations)
+        .set(conversationPatch)
+        .where(eq(conversations.id, conv.id));
 
-        // ---- Build the agent chain ----
-        const chain: Array<{ agent: AgentProfile | null; id: string; label: string }> = [];
-        const startAgent = agent;
-        chain.push({
-          agent: startAgent,
-          id: startAgent?.id ?? "default",
-          label: startAgent?.label ?? providerId,
-        });
-        // Walk the chain. We treat a non-empty `chain` array as the
-        // explicit handoff list. We also let a single agent without a
-        // chain end the run.
-        let cursor: AgentProfile | null = startAgent;
-        const seen = new Set<string>();
-        while (cursor && Array.isArray(cursor.chain) && cursor.chain.length) {
-          const nextId = cursor.chain[0];
-          if (seen.has(nextId)) break; // cycle guard
-          seen.add(nextId);
-          const next = getAgent(nextId);
-          if (!next) break;
-          chain.push({ agent: next, id: next.id, label: next.label });
-          cursor = next;
-        }
-        const finalIndex = chain.length - 1;
+      const agent = conv.agentId ? getAgent(conv.agentId) ?? null : null;
+      const useTools = body.useTools === true;
+      const providerId = agent?.provider ?? conv.provider;
+      const model = agent?.model ?? conv.model;
+      const systemPrompt = withSkills(agent?.systemPrompt ?? conv.systemPrompt ?? undefined);
+      const temperature = agent?.temperature ?? conv.temperature ?? 0.7;
+      const allowedEfforts = ["low", "medium", "high", "xhigh"] as const;
+      type Effort = (typeof allowedEfforts)[number];
+      const resolveEffort = (value: unknown): Effort | undefined =>
+        typeof value === "string" && (allowedEfforts as readonly string[]).includes(value)
+          ? (value as Effort)
+          : undefined;
+      const reasoningEffort =
+        resolveEffort(body.reasoningEffort) ??
+        resolveEffort(agent?.reasoningEffort) ??
+        resolveEffort(conv.reasoningEffort);
+      const showThinking = body.showThinking ?? agent?.showThinking ?? conv.showThinking ?? true;
 
-        // ---- Run each agent in the chain ----
-        for (let i = 0; i < chain.length; i++) {
-          const link = chain[i];
-          const isFinal = i === finalIndex;
-          // Per-agent overrides
-          const linkProvider = link.agent?.provider ?? providerId;
-          const linkModel = link.agent?.model ?? model;
-          const linkSystem = link.agent?.systemPrompt ? withSkills(link.agent.systemPrompt) : systemPrompt;
-          const linkTemp = link.agent?.temperature ?? temperature;
-          // Tools: each agent re-filters via its own allowlist.
-          const linkTools = pickTools({
-            agent: link.agent,
-            useTools,
-            providerId: linkProvider,
-          });
-          const linkSetting = getProviderSetting(linkProvider);
+      streamOwnsLock = true;
 
-          // Build a fresh provider history per agent so they don't see
-          // each other's raw tool calls unless they're the same role.
-          // For simplicity we share working history; provider-side message
-          // translation keeps tool_call/tool_result consistent.
-          const linkProviderMessages: ProviderMessage[] = i === 0
-            ? baseProviderMessages.slice()
-            : baseProviderMessages.concat(); // start over from base
-          // The chain: each non-first agent re-receives the *user* request
-          // plus the previous agent's final text as context. We add a
-          // synthetic "user" message carrying the prior agent's output so
-          // the next agent can react to it without seeing the raw tool
-          // results.
-          if (i > 0) {
-            // Find the previous agent's last assistant text from working.
-            const prevFinal = working
-              .slice()
-              .reverse()
-              .find((m) => m.role === "assistant");
-            if (prevFinal) {
-              linkProviderMessages.push({
-                role: "user",
-                content: `[Previous agent (${chain[i - 1].label}) said]\n${prevFinal.content}`,
-              });
-            }
+      void (async () => {
+        try {
+          const baseProviderMessages = providerHistoryFromMessages(working);
+          const chain: Array<{ agent: AgentProfile | null; id: string; label: string }> = [{
+            agent,
+            id: agent?.id ?? "default",
+            label: agent?.label ?? providerId,
+          }];
+          let cursor: AgentProfile | null = agent;
+          const seen = new Set<string>(agent ? [agent.id] : []);
+          while (cursor && Array.isArray(cursor.chain) && cursor.chain.length) {
+            const nextId = cursor.chain[0];
+            if (seen.has(nextId)) break;
+            seen.add(nextId);
+            const next = getAgent(nextId);
+            if (!next) break;
+            chain.push({ agent: next, id: next.id, label: next.label });
+            cursor = next;
           }
 
-          await runAgentTurn({
-            convRow: conv,
-            agent: link.agent,
-            tools: linkTools,
-            workingHistory: working,
-            workingProviderMessages: linkProviderMessages,
-            assistantMsg,
-            agentId: link.id,
-            label: link.label,
-            stream,
-            signal: ac.signal,
-            setting: { apiKey: linkSetting.apiKey ?? null, baseUrl: linkSetting.baseUrl },
-            providerId: linkProvider,
-            model: linkModel,
-            systemPrompt: linkSystem,
-            temperature: linkTemp,
-            reasoningEffort,
-            showThinking,
-            isFinal,
-          });
-        }
-
-        // Final: the placeholder message row already has the final agent's
-        // text from the isFinal branch. We just emit done.
-        // (runAgentTurn already emitted "done" inside its final pass; this
-        // is a safety net if no agent ran.)
-        try { stream.end(); } catch {}
-      } catch (err: any) {
-        if (err?.name === "AbortError") {
-          try { sendSse(stream, { type: "error", message: "aborted" }); stream.end(); } catch {}
-          return;
-        }
-        try {
-          sendSse(stream, { type: "error", message: err?.message ?? "Upstream error" });
+          let previousAgentOutput: string | undefined;
+          for (let index = 0; index < chain.length; index += 1) {
+            const link = chain[index];
+            const isFinal = index === chain.length - 1;
+            const linkProvider = link.agent?.provider ?? providerId;
+            const linkModel = link.agent?.model ?? model;
+            const linkSystem = link.agent?.systemPrompt ? withSkills(link.agent.systemPrompt) : systemPrompt;
+            const linkTemperature = link.agent?.temperature ?? temperature;
+            const linkTools = pickTools({ agent: link.agent, useTools, providerId: linkProvider });
+            const linkSetting = getProviderSetting(linkProvider);
+            const linkProviderMessages = baseProviderMessages.slice();
+            if (previousAgentOutput !== undefined) {
+              linkProviderMessages.push({
+                role: "user",
+                content: `[Previous agent (${chain[index - 1].label}) said]\n${previousAgentOutput}`,
+              });
+            }
+            const result = await runAgentTurn({
+              conversationId: conv.id,
+              tools: linkTools,
+              workingProviderMessages: linkProviderMessages,
+              agentId: link.id,
+              label: link.label,
+              stream,
+              signal: ac.signal,
+              setting: { apiKey: linkSetting.apiKey ?? null, baseUrl: linkSetting.baseUrl },
+              providerId: linkProvider,
+              model: linkModel,
+              systemPrompt: linkSystem,
+              temperature: linkTemperature,
+              reasoningEffort: resolveEffort(link.agent?.reasoningEffort) ?? reasoningEffort,
+              showThinking: body.showThinking ?? link.agent?.showThinking ?? showThinking,
+              isFinal,
+              nextCreatedAt,
+            });
+            previousAgentOutput = result.content;
+          }
+          rollbackMutation = null;
+          sendSse(stream, { type: "done" });
           stream.end();
-        } catch {}
-      }
-    })();
+        } catch (error: any) {
+          if (rollbackMutation) {
+            const rollback = rollbackMutation;
+            rollbackMutation = null;
+            try {
+              await rollback();
+            } catch (rollbackError) {
+              req.log.error({ err: rollbackError }, "failed to restore chat history after generation error");
+            }
+          }
+          const message = error?.name === "AbortError" ? "aborted" : error?.message ?? "Upstream error";
+          try {
+            sendSse(stream, { type: "error", message });
+            stream.end();
+          } catch {}
+        } finally {
+          req.raw.removeListener("aborted", abort);
+          reply.raw.removeListener("close", abortOnClose);
+          unregisterChatRequest(requestId, ac);
+          releaseLock();
+        }
+      })();
 
-    return reply;
+      return reply;
+    } catch (error: any) {
+      if (rollbackMutation) {
+        const rollback = rollbackMutation;
+        rollbackMutation = null;
+        try {
+          await rollback();
+        } catch (rollbackError) {
+          req.log.error({ err: rollbackError }, "failed to restore chat history after preparation error");
+        }
+      }
+      const message = error?.name === "AbortError"
+        ? "aborted"
+        : error?.message ?? "Failed to prepare chat request";
+      try {
+        if (!stream.writableEnded) {
+          sendSse(stream, { type: "error", message });
+          stream.end();
+        }
+      } catch {}
+      return reply;
+    } finally {
+      if (!streamOwnsLock) {
+        req.raw.removeListener("aborted", abort);
+        reply.raw.removeListener("close", abortOnClose);
+        unregisterChatRequest(requestId, ac);
+        if (!stream.writableEnded) stream.end();
+        releaseLock();
+      }
+    }
   });
 }

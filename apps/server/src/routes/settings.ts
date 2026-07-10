@@ -6,6 +6,10 @@ import { dataDir } from "../data-dir.js";
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 const settingsPath = path.join(dataDir, "settings.json");
 
+if (fs.existsSync(settingsPath)) {
+  try { fs.chmodSync(settingsPath, 0o600); } catch {}
+}
+
 export interface ProviderSetting {
   name?: string;
   apiKey?: string;
@@ -50,7 +54,11 @@ function readSettings(): AppSettings {
 }
 
 function writeSettings(s: AppSettings) {
-  fs.writeFileSync(settingsPath, JSON.stringify(s, null, 2), "utf-8");
+  fs.writeFileSync(settingsPath, JSON.stringify(s, null, 2), {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
+  try { fs.chmodSync(settingsPath, 0o600); } catch {}
 }
 
 function maskKey(k?: string): string | undefined {
@@ -99,7 +107,14 @@ export async function settingsRoutes(app: FastifyInstance) {
       }
       const copied = typeof v.copyFrom === "string" ? current.providers[v.copyFrom] : undefined;
       const prev = merged[k] ?? {};
-      const next: ProviderSetting = { ...(copied ?? prev) };
+      const next: ProviderSetting = copied
+        ? {
+            ...prev,
+            name: copied.name,
+            baseUrl: copied.baseUrl,
+            manualModels: copied.manualModels ? [...copied.manualModels] : undefined,
+          }
+        : { ...prev };
       if (typeof v.name === "string") next.name = v.name.trim();
       if (typeof v.baseUrl === "string") next.baseUrl = v.baseUrl;
       if (typeof v.apiKey === "string") {
@@ -124,7 +139,15 @@ export async function settingsRoutes(app: FastifyInstance) {
         continue;
       }
       const copied = typeof v.copyFrom === "string" ? current.imageProviders[v.copyFrom] : undefined;
-      const next: ImageProviderSetting = { ...(copied ?? mergedImages[k] ?? {}) };
+      const prev = mergedImages[k] ?? {};
+      const next: ImageProviderSetting = copied
+        ? {
+            ...prev,
+            name: copied.name,
+            baseUrl: copied.baseUrl,
+            model: copied.model,
+          }
+        : { ...prev };
       if (typeof v.name === "string") next.name = v.name.trim();
       if (typeof v.baseUrl === "string") next.baseUrl = v.baseUrl.trim();
       if (typeof v.model === "string") next.model = v.model.trim();

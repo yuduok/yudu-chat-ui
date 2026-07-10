@@ -6,6 +6,7 @@ export const zh: Record<TranslationKey, string> = {
   "sidebar.history": "历史记录",
   "sidebar.emptyHistory": "暂无对话，点击上方新建。",
   "sidebar.rename": "重命名",
+  "sidebar.actions": "会话操作",
   "sidebar.delete": "删除",
   "sidebar.settings": "设置",
   "sidebar.imageStudio": "生图工作室",
@@ -13,7 +14,7 @@ export const zh: Record<TranslationKey, string> = {
   "sidebar.expand": "展开侧边栏",
 
   // Composer
-  "composer.placeholder": "输入消息…（Enter 发送，Shift+Enter 换行）",
+  "composer.placeholder": "输入消息…",
   "composer.send": "发送",
   "composer.stop": "停止",
   "composer.disclaimer": "AI 可能会出错，请核实重要信息。",

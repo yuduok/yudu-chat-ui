@@ -3,7 +3,7 @@ import path from "node:path";
 import type { ToolDefinition } from "@yudu/shared";
 import type { ToolHandler } from "./index.js";
 import {
-  assertReadablePath,
+  assertWorkspaceToolPath,
   isSensitivePath,
   resolveWorkspacePath,
   shouldIgnore,
@@ -46,7 +46,7 @@ const handler: ToolHandler = async (args) => {
   }
 
   const start = await resolveWorkspacePath(input.path || ".");
-  assertReadablePath(start);
+  assertWorkspaceToolPath(start);
   const matches: string[] = [];
   let visitedFiles = 0;
 

@@ -28,6 +28,10 @@ pnpm dev
 - Web: http://localhost:5173
 - API: http://localhost:8787
 
+The API binds to `127.0.0.1` by default because it stores conversations and
+provider credentials. Set `HOST=0.0.0.0` only when you intentionally want to
+expose it beyond the local machine and have added an authentication boundary.
+
 The first time you run the app, conversations and settings are stored under
 `apps/server/data/`. Open Settings, paste an API key for the provider you want
 to use, and start chatting. Toggle "Run with tools" in the composer to let the
@@ -331,11 +335,14 @@ Layered on top of v4:
 - `GET /api/conversations/:id`, `PATCH /api/conversations/:id` (accepts `agentId`),
   `DELETE /api/conversations/:id`
 - `DELETE /api/conversations/:id/messages/:messageId`
-- `POST /api/chat` (SSE) — accepts `useTools?: boolean`,
+- `POST /api/chat` (SSE) — accepts a client-generated `requestId` plus `useTools?: boolean`,
   `reasoningEffort?: "low" | "medium" | "high" | "xhigh"`,
   `showThinking?: boolean`. Emits `delta`, `reasoning_delta`,
   `tool_call`, `tool_result`, `agent_started`, `agent_finished`,
   `usage`, `message`, `done`, `error`.
+- `POST /api/chat/cancel` — explicitly cancels an active or queued chat by
+  `requestId`; this is the correctness path when an HTTP client keeps its
+  connection alive after locally aborting a response reader.
 - `POST /api/conversations` / `PATCH /api/conversations/:id` — accept
   `reasoningEffort` and `showThinking` in addition to v3 fields.
 - `GET /api/settings`, `PUT /api/settings`
@@ -382,6 +389,13 @@ pnpm dev:server           # terminal B — Fastify on 127.0.0.1:8787
 In `tauri dev` the Rust shell starts but **does not** auto-spawn the sidecar
 (it expects you to run `pnpm dev:server` so you can edit server code with HMR).
 The web UI inside the window talks to `http://127.0.0.1:8787/api`.
+
+Release builds are single-instance. They launch the sidecar on a discovered
+loopback port, expose the current port through Tauri's `server_status` command,
+and verify a per-process health token before the WebView trusts that endpoint.
+If the sidecar exits during startup (for example because another process won a
+port race), the shell reselects a port once and the WebView follows the updated
+status instead of staying pinned to a stale address.
 
 ### Build a release app
 

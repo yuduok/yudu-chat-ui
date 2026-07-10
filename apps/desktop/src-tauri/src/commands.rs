@@ -11,28 +11,25 @@ pub fn sidecar_binary_name() -> String {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ServerStatus {
     pub running: bool,
     pub port: u16,
+    pub health_token: String,
 }
 
 #[tauri::command]
 pub fn server_status(state: State<SidecarState>) -> ServerStatus {
-    let running = state
-        .child
-        .lock()
-        .ok()
-        .map(|g| g.is_some())
-        .unwrap_or(false);
     ServerStatus {
-        running,
-        port: state.port,
+        running: state.is_running(),
+        port: state.port(),
+        health_token: state.health_token().to_string(),
     }
 }
 
 #[tauri::command]
 pub fn server_port(state: State<SidecarState>) -> u16 {
-    state.port
+    state.port()
 }
 
 #[tauri::command]
@@ -41,9 +38,7 @@ pub fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err("only http(s) urls are allowed".into());
     }
-    app.shell()
-        .open(url, None)
-        .map_err(|e| e.to_string())
+    app.shell().open(url, None).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

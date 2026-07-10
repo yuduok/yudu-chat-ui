@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import type { ToolDefinition } from "@yudu/shared";
 import type { ToolHandler } from "./index.js";
 import path from "node:path";
-import { assertReadablePath, isSensitivePath, resolveWorkspacePath } from "./workspace.js";
+import { assertWorkspaceToolPath, isSensitivePath, resolveWorkspacePath } from "./workspace.js";
 
 const def: ToolDefinition = {
   name: "list_directory",
@@ -21,7 +21,7 @@ const handler: ToolHandler = async (args) => {
     return { content: "'path' must be a string", isError: true };
   }
   const directory = await resolveWorkspacePath(inputPath || ".");
-  assertReadablePath(directory);
+  assertWorkspaceToolPath(directory);
   const entries = await fs.readdir(directory, { withFileTypes: true });
   const lines = entries
     .filter((entry) => !isSensitivePath(path.join(directory, entry.name)))
