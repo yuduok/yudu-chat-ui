@@ -105,52 +105,48 @@ export function ConversationTabs() {
           return (
             <div
               key={c.id}
-              data-tab-id={c.id}
-              role="tab"
-              tabIndex={isActive ? 0 : -1}
-              aria-selected={isActive}
               className={cn(
-                "group flex h-9 shrink-0 cursor-pointer items-center gap-1 rounded-md border px-3 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "group flex h-9 shrink-0 items-center rounded-md border text-xs",
                 isActive
                   ? "border-primary/40 bg-primary/10 text-foreground"
                   : "border-transparent bg-muted/40 text-muted-foreground hover:bg-muted",
               )}
-              onClick={() => {
-                if (!isActive) void select(c.id);
-              }}
-              onKeyDown={(e) => {
-                // Mirror Radix Tabs keyboard semantics: ArrowLeft/Right
-                // move focus between tabs, Home/End jump to the ends,
-                // Enter / Space activate the focused tab.
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  if (!isActive) void select(c.id);
-                  return;
-                }
-                if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
-                e.preventDefault();
-                const list = tabs;
-                const i = list.findIndex((x) => x.id === c.id);
-                const target =
-                  e.key === "Home"
-                    ? 0
-                    : e.key === "End"
-                      ? list.length - 1
-                      : (i + (e.key === "ArrowRight" ? 1 : -1) + list.length) % list.length;
-                const next = list[target];
-                if (next) {
-                  const el = scrollRef.current?.querySelector<HTMLElement>(`[data-tab-id="${next.id}"]`);
-                  el?.focus();
-                  if (next.id !== activeId) void select(next.id);
-                }
-              }}
             >
-              <span className="max-w-[180px] truncate">{c.title || "New Chat"}</span>
+              <button
+                type="button"
+                data-tab-id={c.id}
+                role="tab"
+                tabIndex={isActive ? 0 : -1}
+                aria-selected={isActive}
+                className="flex h-full items-center px-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => {
+                  if (!isActive) void select(c.id);
+                }}
+                onKeyDown={(e) => {
+                  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+                  e.preventDefault();
+                  const index = tabs.findIndex((tab) => tab.id === c.id);
+                  const target =
+                    e.key === "Home"
+                      ? 0
+                      : e.key === "End"
+                        ? tabs.length - 1
+                        : (index + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+                  const next = tabs[target];
+                  if (next) {
+                    const element = scrollRef.current?.querySelector<HTMLElement>(`[data-tab-id="${next.id}"]`);
+                    element?.focus();
+                    if (next.id !== activeId) void select(next.id);
+                  }
+                }}
+              >
+                <span className="max-w-[96px] truncate sm:max-w-[180px]">{c.title || "New Chat"}</span>
+              </button>
               <button
                 type="button"
                 className={cn(
-                  "ml-1 inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
-                  isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                  "mr-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                  isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
                 )}
                 aria-label={t("tabs.close")}
                 title={t("tabs.close")}
@@ -180,11 +176,11 @@ export function ConversationTabs() {
                 type="button"
                 title={t("export.menuLabel")}
                 aria-label={t("export.menuLabel")}
-                className="inline-flex h-7 items-center gap-1 rounded-md border bg-background px-2 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="inline-flex size-7 items-center justify-center rounded-md border bg-background text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground sm:w-auto sm:px-2"
               >
-                <Download className="h-3 w-3" />
-                <span>{t("export.menu")}</span>
-                <ChevronDown className="h-3 w-3 opacity-60" />
+                <Download />
+                <span className="hidden sm:inline">{t("export.menu")}</span>
+                <ChevronDown className="hidden opacity-60 sm:block" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-[180px]">

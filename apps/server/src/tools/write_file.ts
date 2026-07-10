@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import type { ToolDefinition } from "@yudu/shared";
 import type { ToolHandler } from "./index.js";
-import { envFlag, resolveWorkspacePath } from "./workspace.js";
+import { assertWorkspaceToolPath, envFlag, resolveWorkspacePath } from "./workspace.js";
 
 const def: ToolDefinition = {
   name: "write_file",
@@ -25,6 +25,7 @@ const handler: ToolHandler = async (args) => {
     return { content: "content exceeds the 2 MB write limit", isError: true };
   }
   const filePath = await resolveWorkspacePath(input.path, { mustExist: false });
+  assertWorkspaceToolPath(filePath);
   await fs.writeFile(filePath, input.content, {
     encoding: "utf8",
     flag: input.create_only ? "wx" : "w",

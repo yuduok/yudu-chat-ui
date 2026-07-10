@@ -4,10 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { execute_command } from "../src/tools/execute_command.js";
+import { list_directory } from "../src/tools/list_directory.js";
 import { read_file } from "../src/tools/read_file.js";
 import { search_files } from "../src/tools/search_files.js";
 import { resolveWorkspacePath } from "../src/tools/workspace.js";
 import { write_file } from "../src/tools/write_file.js";
+import { dataDir } from "../src/data-dir.js";
 
 async function withWorkspace(run: (root: string) => Promise<void>): Promise<void> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "yudu-tools-"));
@@ -35,10 +37,85 @@ test("read-only tools block common credential paths", async () => {
     await fs.writeFile(path.join(root, ".env"), "SECRET=value\n", "utf8");
     await assert.rejects(
       read_file.handler({ path: ".env" }, {}),
-      /credential and secret paths/,
+      /application data, credentials, and internal paths/,
     );
 
     const searchResult = await search_files.handler({ query: "SECRET" }, {});
+    assert.equal(searchResult.content, "no matches");
+  });
+});
+
+test("workspace tools cannot access the application data directory", async () => {
+  const previousRoot = process.env.YUDU_WORKSPACE_ROOT;
+  const root = path.dirname(dataDir);
+  const relativeDataDir = path.relative(root, dataDir) || ".";
+  process.env.YUDU_WORKSPACE_ROOT = root;
+  try {
+    await assert.rejects(
+      read_file.handler({ path: relativeDataDir }, {}),
+      /application data, credentials, and internal paths/,
+    );
+    await assert.rejects(
+      list_directory.handler({ path: relativeDataDir }, {}),
+      /application data, credentials, and internal paths/,
+    );
+    await assert.rejects(
+      search_files.handler({ path: relativeDataDir, query: "apiKey" }, {}),
+      /application data, credentials, and internal paths/,
+    );
+    await assert.rejects(
+      write_file.handler({ path: path.join(relativeDataDir, "blocked.txt"), content: "blocked" }, {}),
+      /application data, credentials, and internal paths/,
+    );
+  } finally {
+    if (previousRoot === undefined) delete process.env.YUDU_WORKSPACE_ROOT;
+    else process.env.YUDU_WORKSPACE_ROOT = previousRoot;
+  }
+});
+
+test("write_file blocks new application data files through a symlink parent", async () => {
+  const previousRoot = process.env.YUDU_WORKSPACE_ROOT;
+  const root = path.dirname(dataDir);
+  const unique = `${process.pid}-${Date.now()}`;
+  const linkName = `.yudu-data-link-${unique}`;
+  const targetName = `.blocked-${unique}.txt`;
+  const linkPath = path.join(root, linkName);
+  const targetPath = path.join(dataDir, targetName);
+  process.env.YUDU_WORKSPACE_ROOT = root;
+
+  try {
+    await fs.symlink(dataDir, linkPath, process.platform === "win32" ? "junction" : "dir");
+    await assert.rejects(
+      write_file.handler({ path: path.join(linkName, targetName), content: "blocked" }, {}),
+      /application data, credentials, and internal paths/,
+    );
+    await assert.rejects(fs.access(targetPath), { code: "ENOENT" });
+  } finally {
+    await fs.rm(linkPath, { force: true });
+    await fs.rm(targetPath, { force: true });
+    if (previousRoot === undefined) delete process.env.YUDU_WORKSPACE_ROOT;
+    else process.env.YUDU_WORKSPACE_ROOT = previousRoot;
+  }
+});
+
+test("workspace tools consistently hide .git internals", async () => {
+  await withWorkspace(async (root) => {
+    await fs.mkdir(path.join(root, ".git"), { recursive: true });
+    await fs.writeFile(path.join(root, ".git", "config"), "AUDIT_MARKER=secret\n", "utf8");
+
+    await assert.rejects(
+      read_file.handler({ path: ".git/config" }, {}),
+      /application data, credentials, and internal paths/,
+    );
+    await assert.rejects(
+      list_directory.handler({ path: ".git" }, {}),
+      /application data, credentials, and internal paths/,
+    );
+    await assert.rejects(
+      write_file.handler({ path: ".git/config", content: "changed" }, {}),
+      /application data, credentials, and internal paths/,
+    );
+    const searchResult = await search_files.handler({ query: "AUDIT_MARKER" }, {});
     assert.equal(searchResult.content, "no matches");
   });
 });

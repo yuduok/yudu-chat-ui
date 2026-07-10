@@ -1,5 +1,7 @@
 import fs from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import path from "node:path";
+import { dataDir } from "../data-dir.js";
 
 const DEFAULT_IGNORES = new Set([
   ".git",
@@ -20,6 +22,14 @@ const SENSITIVE_FILENAMES = new Set([
   "id_rsa",
   "service-account.json",
 ]);
+
+const applicationDataRoot = (() => {
+  try {
+    return realpathSync(dataDir);
+  } catch {
+    return path.resolve(dataDir);
+  }
+})();
 
 export function getWorkspaceRoot(): string {
   return path.resolve(process.env.YUDU_WORKSPACE_ROOT || process.cwd());
@@ -46,7 +56,7 @@ export async function resolveWorkspacePath(
     if (error?.code !== "ENOENT" || opts.mustExist !== false) throw error;
     const parent = await fs.realpath(path.dirname(candidate));
     if (!isInside(root, parent)) throw new Error("path parent resolves outside the configured workspace");
-    return candidate;
+    return path.join(parent, path.basename(candidate));
   }
 }
 
@@ -60,18 +70,20 @@ export function shouldIgnore(name: string): boolean {
 }
 
 export function isSensitivePath(absolutePath: string): boolean {
+  const candidate = path.resolve(absolutePath);
+  if (isInside(applicationDataRoot, candidate)) return true;
   const relative = path.relative(getWorkspaceRoot(), absolutePath);
-  const parts = relative.split(path.sep).filter(Boolean);
+  const parts = relative.split(path.sep).filter(Boolean).map((part) => part.toLowerCase());
   if (parts.some((part) => SENSITIVE_DIRECTORIES.has(part))) return true;
-  const filename = parts.at(-1)?.toLowerCase() ?? "";
+  const filename = parts.at(-1) ?? "";
   if (filename === ".env" || (filename.startsWith(".env.") && filename !== ".env.example")) return true;
   if (SENSITIVE_FILENAMES.has(filename)) return true;
   return [".key", ".p12", ".pem", ".pfx"].some((extension) => filename.endsWith(extension));
 }
 
-export function assertReadablePath(absolutePath: string): void {
+export function assertWorkspaceToolPath(absolutePath: string): void {
   if (isSensitivePath(absolutePath)) {
-    throw new Error("access to credential and secret paths is blocked");
+    throw new Error("access to application data, credentials, and internal paths is blocked");
   }
 }
 

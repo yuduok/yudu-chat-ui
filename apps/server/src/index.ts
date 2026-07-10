@@ -35,7 +35,14 @@ export async function start(): Promise<void> {
   await app.register(sensible);
   await app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024 } });
 
-  app.get("/api/health", async () => ({ ok: true, ts: Date.now() }));
+  app.get("/api/health", async (req, reply) => {
+    const expectedToken = process.env.YUDU_HEALTH_TOKEN ?? "";
+    const presentedToken = req.headers["x-yudu-health-token"];
+    if (expectedToken && presentedToken !== expectedToken) {
+      return reply.code(404).send({ error: "Not found" });
+    }
+    return { ok: true, ts: Date.now(), token: expectedToken };
+  });
 
   // Bootstrap side-effects: load agent profiles and register built-in tools.
   registerBuiltinTools();
@@ -52,7 +59,9 @@ export async function start(): Promise<void> {
   await app.register(skillRoutes);
 
   const port = Number(process.env.PORT ?? 8787);
-  const host = process.env.HOST ?? "0.0.0.0";
+  // This API stores conversations and provider credentials, so local-only is
+  // the safe default. Operators can opt into LAN/container exposure with HOST.
+  const host = process.env.HOST ?? "127.0.0.1";
 
   try {
     await app.listen({ port, host });

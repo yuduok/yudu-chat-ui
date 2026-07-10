@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -31,7 +32,6 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
   const send = useChat((s) => s.sendMessage);
   const stop = useChat((s) => s.stop);
   const streaming = useChat((s) => s.streaming);
-  const updateConv = useChat((s) => s.updateConversationSettings);
   // Provider / model / showThinking are *global* settings — they
   // apply to every tab, not just the active one. We use
   // `applyGlobalSettings` (server round-trip) for the bulk write
@@ -122,11 +122,13 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
               <SelectValue placeholder={t("settings.provider")} />
             </SelectTrigger>
             <SelectContent>
-              {providers.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.label}
-                </SelectItem>
-              ))}
+              <SelectGroup>
+                {providers.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
           <Select
@@ -137,19 +139,21 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
             }}
             disabled={!active}
           >
-            <SelectTrigger className="h-8 min-w-[160px] flex-1 text-xs sm:w-[200px] sm:flex-none">
+            <SelectTrigger className="h-8 min-w-[160px] flex-1 text-xs sm:w-[200px] sm:flex-none" aria-label={t("images.model")}>
               <SelectValue placeholder={active?.model} />
             </SelectTrigger>
             <SelectContent>
-              {modelList.length === 0 ? (
-                <SelectItem value={active?.model ?? ""}>{active?.model}</SelectItem>
-              ) : (
-                modelList.map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {m}
-                  </SelectItem>
-                ))
-              )}
+              <SelectGroup>
+                {modelList.length === 0 ? (
+                  <SelectItem value={active?.model ?? ""}>{active?.model}</SelectItem>
+                ) : (
+                  modelList.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {m}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectGroup>
             </SelectContent>
           </Select>
         </div>
@@ -178,7 +182,7 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
         {uploadError && <p className="text-xs text-destructive">{uploadError}</p>}
 
         {/* Middle row: input + send button (send aligned with input baseline) */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-end gap-2">
           <input
             ref={fileRef}
             type="file"
@@ -218,12 +222,13 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
               void addFiles(event.dataTransfer.files);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 submit();
               }
             }}
             placeholder={t("composer.placeholder")}
+            aria-keyshortcuts="Enter"
             className="min-h-10 flex-1 resize-none"
             rows={1}
           />

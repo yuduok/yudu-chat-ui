@@ -51,7 +51,14 @@ export class AnthropicProvider implements ChatProvider {
       messages.push(messageToAnthropic(m));
     }
 
-    const thinkingBudget = thinkingBudgetFor(input.reasoningEffort);
+    // Anthropic requires signed thinking blocks to be replayed unchanged when
+    // a tool_result follows a thinking+tool_use turn. We intentionally do not
+    // persist provider signatures, so advertising tools and extended thinking
+    // together would produce an invalid second request. Prefer a valid tool
+    // loop until signature-aware persistence is implemented.
+    const thinkingBudget = input.tools?.length
+      ? null
+      : thinkingBudgetFor(input.reasoningEffort);
     // Lift max_tokens to accommodate the thinking budget so high/xhigh
     // don't get truncated mid-stream. We pick the larger of a 4k text
     // budget and 2x the thinking budget so the visible reply has room.
@@ -200,6 +207,9 @@ export class AnthropicProvider implements ChatProvider {
 
 function messageToAnthropic(m: ProviderMessage): { role: string; content: unknown } {
   const parts = m.parts;
+  // Anthropic accepts only user/assistant roles. Tool results are user content
+  // blocks that immediately follow the assistant's tool_use blocks.
+  const role = m.role === "tool" ? "user" : m.role;
 
   // Mixed tool_use / tool_result / text parts -> one user or assistant turn.
   if (parts && parts.length) {
@@ -236,7 +246,7 @@ function messageToAnthropic(m: ProviderMessage): { role: string; content: unknow
         });
       }
     }
-    if (blocks.length) return { role: m.role, content: blocks };
+    if (blocks.length) return { role, content: blocks };
   }
 
   // toolCalls-only fallback (assistant message with tool_use but no parts).
@@ -247,10 +257,10 @@ function messageToAnthropic(m: ProviderMessage): { role: string; content: unknow
       name: tc.name,
       input: typeof tc.arguments === "string" ? safeParse(tc.arguments) : tc.arguments,
     }));
-    return { role: m.role, content: blocks };
+    return { role, content: blocks };
   }
 
-  return { role: m.role, content: m.content };
+  return { role, content: m.content };
 }
 
 function safeParse(s: string): unknown {

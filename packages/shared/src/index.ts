@@ -237,9 +237,17 @@ export type StreamEvent =
 
 export interface ChatRequest {
   conversationId: string;
+  // Client-generated id used by the explicit cancellation endpoint. Network
+  // aborts are only best-effort because some HTTP stacks keep the connection
+  // alive after cancelling a local response reader.
+  requestId?: string;
   content?: string;
   parts?: ContentPart[];
   regenerate?: boolean;
+  // Edit this specific user message, truncate every later turn, then
+  // generate a fresh assistant response from the edited history.
+  editMessageId?: string;
+  // Backward-compatible shorthand for editing the latest user message.
   editLastUser?: boolean;
   // When true, the server pulls in any tools registered for the current
   // agent / provider before dispatching. The mock provider always honors

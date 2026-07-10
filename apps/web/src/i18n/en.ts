@@ -4,6 +4,7 @@ export const en = {
   "sidebar.history": "History",
   "sidebar.emptyHistory": "No conversations yet. Start a new chat.",
   "sidebar.rename": "Rename",
+  "sidebar.actions": "Conversation actions",
   "sidebar.delete": "Delete",
   "sidebar.settings": "Settings",
   "sidebar.imageStudio": "Image studio",
@@ -11,7 +12,7 @@ export const en = {
   "sidebar.expand": "Expand sidebar",
 
   // Composer
-  "composer.placeholder": "Send a message… (Enter to send, Shift+Enter for newline)",
+  "composer.placeholder": "Send a message…",
   "composer.send": "Send",
   "composer.stop": "Stop",
   "composer.disclaimer": "AI can make mistakes. Verify important info.",

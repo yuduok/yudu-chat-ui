@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, ImagePlus, Loader2, RefreshCw, Settings, Sparkles, Square, Trash2, Upload, X } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Download, ImagePlus, Loader2, Menu, RefreshCw, Settings, Sparkles, Square, Trash2, Upload, X } from "lucide-react";
 import type { ImageGeneration, ImageGenerationCapabilities, ImageGenerationRequest } from "@yudu/shared";
 import { Sidebar } from "@/components/sidebar";
-import { SettingsDialog } from "@/components/settings-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { apiAssetUrl, getImageCapabilities, getSettings } from "@/lib/api";
 import { useImageGeneration } from "@/store/image-generation";
@@ -17,6 +16,11 @@ type ReferenceImage = { name: string; dataUrl: string };
 
 const STORAGE_KEY = "yudu-image-generation-defaults";
 const isCustomProvider = (id: string) => id === "custom" || id.startsWith("custom:");
+const SettingsDialog = lazy(() =>
+  import("@/components/settings-dialog").then((module) => ({
+    default: module.SettingsDialog,
+  })),
+);
 
 function fileToReference(file: File): Promise<ReferenceImage> {
   return new Promise((resolve, reject) => {
@@ -30,6 +34,7 @@ function fileToReference(file: File): Promise<ReferenceImage> {
 export function ImageGenerationPage() {
   const { t } = useI18n();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [capabilities, setCapabilities] = useState<CapabilityEntry[]>([]);
   const [configuredModels, setConfiguredModels] = useState<Record<string, string>>({});
   const [provider, setProvider] = useState("mock");
@@ -149,26 +154,45 @@ export function ImageGenerationPage() {
 
   return (
     <div className="flex h-full">
-      <Sidebar mode="images" onOpenSettings={() => setSettingsOpen(true)} />
+      <Sidebar
+        mode="images"
+        mobileOpen={sidebarOpen}
+        onMobileOpenChange={setSidebarOpen}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
       <main className="min-w-0 flex-1 overflow-y-auto bg-muted/20">
-        <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/90 px-5 py-3 backdrop-blur">
-          <div><h1 className="font-semibold">{t("images.title")}</h1><p className="text-xs text-muted-foreground">{t("images.subtitle")}</p></div>
-          <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)} aria-label={t("sidebar.settings")}><Settings className="h-4 w-4" /></Button>
+        <header className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b bg-background/90 px-3 py-3 backdrop-blur sm:px-5">
+          <div className="flex min-w-0 items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 shrink-0 md:hidden"
+              onClick={() => setSidebarOpen(true)}
+              aria-label={t("sidebar.expand")}
+            >
+              <Menu />
+            </Button>
+            <div className="min-w-0">
+              <h1 className="truncate font-semibold">{t("images.title")}</h1>
+              <p className="truncate text-xs text-muted-foreground">{t("images.subtitle")}</p>
+            </div>
+          </div>
+          <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)} aria-label={t("sidebar.settings")}><Settings /></Button>
         </header>
-        <div className="mx-auto grid max-w-7xl gap-6 p-5 lg:grid-cols-[360px_minmax(0,1fr)]">
+        <div className="mx-auto grid max-w-7xl gap-4 p-3 sm:gap-6 sm:p-5 lg:grid-cols-[360px_minmax(0,1fr)]">
           <section className="h-fit space-y-5 rounded-2xl border bg-card p-5 shadow-sm lg:sticky lg:top-20">
-            <div className="space-y-2"><Label>{t("images.prompt")}</Label><Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} className="min-h-32" placeholder={t("images.promptPlaceholder")} /></div>
+            <div className="space-y-2"><Label htmlFor="image-prompt">{t("images.prompt")}</Label><Textarea id="image-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} className="min-h-32" placeholder={t("images.promptPlaceholder")} /></div>
             <div className="grid grid-cols-2 gap-3">
               <Option label={t("images.provider")} value={provider} values={capabilities.map((entry) => entry.provider)} valueLabels={Object.fromEntries(capabilities.map((entry) => [entry.provider, entry.label || entry.provider]))} onChange={changeProvider} />
-              {isCustomProvider(provider) ? <div className="space-y-2"><Label>{t("images.model")}</Label><Input value={model} onChange={(event) => setModel(event.target.value)} placeholder="gpt-image-2" /></div> : <Option label={t("images.model")} value={model} values={capability?.models ?? []} onChange={setModel} />}
+              {isCustomProvider(provider) ? <div className="space-y-2"><Label htmlFor="image-model">{t("images.model")}</Label><Input id="image-model" value={model} onChange={(event) => setModel(event.target.value)} placeholder="gpt-image-2" /></div> : <Option label={t("images.model")} value={model} values={capability?.models ?? []} onChange={setModel} />}
               <Option label={t("images.size")} value={size} values={capability?.sizes ?? []} onChange={setSize} />
               <Option label={t("images.quality")} value={quality} values={capability?.qualities ?? []} onChange={setQuality} />
               {capability && capability.styles.length > 0 && <Option label={t("images.style")} value={style} values={capability.styles} onChange={setStyle} />}
               <Option label={t("images.format")} value={outputFormat} values={capability?.outputFormats ?? []} onChange={setOutputFormat} />
               <Option label={t("images.background")} value={background} values={capability?.backgrounds ?? []} onChange={setBackground} />
               <Option label={t("images.moderation")} value={moderation} values={capability?.moderations ?? []} onChange={setModeration} />
-              <div className="space-y-2"><Label>{t("images.count")}</Label><Input type="number" min={1} max={capability?.maxImages ?? 1} value={count} onChange={(event) => setCount(Math.max(1, Math.min(Number(event.target.value), capability?.maxImages ?? 1)))} /></div>
-              {capability?.supportsOutputCompression && outputFormat !== "png" && <div className="space-y-2"><Label>{t("images.compression")}</Label><Input type="number" min={0} max={100} value={outputCompression} onChange={(event) => setOutputCompression(Math.max(0, Math.min(100, Number(event.target.value))))} /></div>}
+              <div className="space-y-2"><Label htmlFor="image-count">{t("images.count")}</Label><Input id="image-count" type="number" min={1} max={capability?.maxImages ?? 1} value={count} onChange={(event) => setCount(Math.max(1, Math.min(Number(event.target.value), capability?.maxImages ?? 1)))} /></div>
+              {capability?.supportsOutputCompression && outputFormat !== "png" && <div className="space-y-2"><Label htmlFor="image-compression">{t("images.compression")}</Label><Input id="image-compression" type="number" min={0} max={100} value={outputCompression} onChange={(event) => setOutputCompression(Math.max(0, Math.min(100, Number(event.target.value))))} /></div>}
             </div>
             {capability?.supportsReferenceImages && (
               <div className="space-y-2">
@@ -190,13 +214,17 @@ export function ImageGenerationPage() {
           </section>
         </div>
       </main>
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} onSaved={refreshImageSettings} defaultTab="images" />
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsDialog open onOpenChange={setSettingsOpen} onSaved={refreshImageSettings} defaultTab="images" />
+        </Suspense>
+      )}
     </div>
   );
 }
 
 function Option({ label, value, values, valueLabels, onChange }: { label: string; value: string; values: string[]; valueLabels?: Record<string, string>; onChange: (value: string) => void }) {
-  return <div className="space-y-2"><Label>{label}</Label><Select value={value} onValueChange={onChange}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{values.map((option) => <SelectItem key={option} value={option}>{valueLabels?.[option] ?? option}</SelectItem>)}</SelectContent></Select></div>;
+  return <div className="space-y-2"><Label>{label}</Label><Select value={value} onValueChange={onChange}><SelectTrigger aria-label={label}><SelectValue /></SelectTrigger><SelectContent><SelectGroup>{values.map((option) => <SelectItem key={option} value={option}>{valueLabels?.[option] ?? option}</SelectItem>)}</SelectGroup></SelectContent></Select></div>;
 }
 
 function GenerationCard({ item, onReuse, onDelete }: { item: ImageGeneration; onReuse: () => void; onDelete: () => void }) {

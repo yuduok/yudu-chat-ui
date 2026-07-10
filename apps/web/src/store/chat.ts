@@ -1,4 +1,4 @@
-import { create } from "zustand";
+import { create, type StoreApi } from "zustand";
 import type { ChatMessage, Conversation } from "@yudu/shared";
 import * as api from "@/lib/api";
 import { useUiDefaults } from "@/store/ui-defaults";
@@ -110,6 +110,7 @@ interface ChatState {
     opts?: {
       regenerate?: boolean;
       editLastUser?: boolean;
+      editMessageId?: string;
       useTools?: boolean;
       reasoningEffort?: "low" | "medium" | "high" | "xhigh";
       showThinking?: boolean;
@@ -119,7 +120,86 @@ interface ChatState {
   stop: () => void;
 }
 
-let currentAbort: AbortController | null = null;
+interface ActiveChatRequest {
+  id: number;
+  conversationId: string;
+  serverRequestId: string;
+  controller: AbortController;
+}
+
+let requestSequence = 0;
+let activeRequest: ActiveChatRequest | null = null;
+let globalSettingsQueue: Promise<void> = Promise.resolve();
+let globalSettingsRevision = 0;
+const globalSettingsFieldRevision = new Map<string, number>();
+let conversationMutationRevision = 0;
+let conversationListRequestSequence = 0;
+let conversationDetailRequestSequence = 0;
+let conversationMessageRevision = 0;
+
+interface ConversationDetailGuard {
+  requestId: number;
+  messageRevision: number;
+}
+
+function beginConversationDetailRequest(): ConversationDetailGuard {
+  return {
+    requestId: ++conversationDetailRequestSequence,
+    messageRevision: conversationMessageRevision,
+  };
+}
+
+function isConversationDetailCurrent(
+  guard: ConversationDetailGuard,
+  conversationId: string,
+  activeId: string | null,
+): boolean {
+  return (
+    guard.requestId === conversationDetailRequestSequence &&
+    guard.messageRevision === conversationMessageRevision &&
+    activeId === conversationId
+  );
+}
+
+function createServerRequestId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function abortChatRequest(request: ActiveChatRequest): void {
+  // HTTP reader cancellation alone is not guaranteed to close a reused
+  // connection. The explicit request id makes queued cancellation reliable.
+  void api.cancelChat(request.serverRequestId).catch(() => {});
+  request.controller.abort();
+}
+
+function supersedeActiveRequest(): void {
+  const request = activeRequest;
+  if (!request) return;
+  abortChatRequest(request);
+  if (activeRequest === request) activeRequest = null;
+}
+
+async function refreshActiveMessages(
+  conversationId: string,
+  get: StoreApi<ChatState>["getState"],
+  set: StoreApi<ChatState>["setState"],
+  stillValid: () => boolean = () => true,
+): Promise<boolean> {
+  if (!stillValid() || get().activeId !== conversationId) return false;
+  const guard = beginConversationDetailRequest();
+  const detail = await api.getConversation(conversationId);
+  if (
+    !stillValid() ||
+    !isConversationDetailCurrent(guard, conversationId, get().activeId)
+  ) {
+    return false;
+  }
+  set({ messages: detail.messages });
+  return true;
+}
 
 export const useChat = create<ChatState>((set, get) => ({
   conversations: [],
@@ -135,10 +215,12 @@ export const useChat = create<ChatState>((set, get) => ({
     // Decide the fallback active id *before* mutating state so the
     // neighbor pick is based on the pre-close tab order.
     const before = get();
+    const closingActive = before.activeId === id;
+    if (closingActive && before.streaming) supersedeActiveRequest();
     const idx = before.openTabs.indexOf(id);
     const stillInStrip = before.openTabs.filter((x) => x !== id);
     let fallback: string | null = before.activeId;
-    if (before.activeId === id) {
+    if (closingActive) {
       // Prefer the next neighbor; otherwise the previous; otherwise
       // whatever's still in the strip; otherwise null.
       const next = stillInStrip[idx] ?? stillInStrip[idx - 1] ?? stillInStrip[0] ?? null;
@@ -150,21 +232,28 @@ export const useChat = create<ChatState>((set, get) => ({
       // available tab (or clear the active conversation entirely if
       // there are none left).
       activeId: fallback,
-      messages: fallback ? before.messages : [],
+      messages: closingActive ? [] : before.messages,
+      activeToolCalls: closingActive ? [] : before.activeToolCalls,
+      activeAgentEvents: closingActive ? [] : before.activeAgentEvents,
+      error: closingActive ? null : before.error,
+      streaming: closingActive ? false : before.streaming,
     });
-    if (fallback) {
+    if (closingActive && fallback) {
       // Re-load messages for the now-active tab.
-      api.getConversation(fallback).then((detail) => {
-        // Guard: the user might have switched tabs again before the
-        // request resolved.
-        if (get().activeId !== fallback) return;
-        set({ messages: detail.messages });
-      }).catch(() => {});
+      void refreshActiveMessages(fallback, get, set).catch(() => {});
     }
   },
 
   async loadConversations() {
+    const requestId = ++conversationListRequestSequence;
+    const revisionAtStart = conversationMutationRevision;
     const list = await api.listConversations();
+    if (
+      requestId !== conversationListRequestSequence ||
+      revisionAtStart !== conversationMutationRevision
+    ) {
+      return;
+    }
     // Convergence: if localStorage has never been written to for the
     // UI defaults (i.e. this is the first load with the new global-
     // settings model — every prior conversation was using its own
@@ -188,28 +277,59 @@ export const useChat = create<ChatState>((set, get) => ({
         showThinking: latest.showThinking ?? true,
       });
     }
-    set((s) => {
-      // Reconcile `openTabs` with the latest server list: keep any
-      // existing open tab that's still in the DB; drop any that
-      // have been removed server-side; if the user has never opened
-      // a tab in this session, seed the strip with the most recently
-      // updated conversation so the UI is never empty.
-      const ids = new Set(list.map((c) => c.id));
-      const kept = s.openTabs.filter((id) => ids.has(id));
-      const seed = kept.length === 0 && list.length > 0 ? [list[0].id] : [];
-      return {
-        conversations: list,
-        openTabs: kept.length > 0 ? kept : seed,
-      };
+    const before = get();
+    const ids = new Set(list.map((conversation) => conversation.id));
+    const keptTabs = before.openTabs.filter((id) => ids.has(id));
+    const openTabs =
+      keptTabs.length > 0 ? keptTabs : list.length > 0 ? [list[0].id] : [];
+    const activeId =
+      before.activeId && ids.has(before.activeId)
+        ? before.activeId
+        : openTabs[0] ?? null;
+    const activeChanged = activeId !== before.activeId;
+    set({
+      conversations: list,
+      openTabs,
+      activeId,
+      ...(activeChanged
+        ? {
+            messages: [],
+            error: null,
+            activeToolCalls: [],
+            activeAgentEvents: [],
+          }
+        : {}),
     });
+    if (activeChanged && activeId) {
+      await refreshActiveMessages(activeId, get, set);
+    }
   },
 
   // Import a previously-exported conversation JSON object. The server
   // re-keys ids so the import never collides with existing data; we
   // then prepend the new conversation to the sidebar and select it.
   async importConversationFromObject(payload: unknown) {
-    if (get().streaming) get().stop();
-    const conv = await api.importConversation(payload);
+    const interruptedId = get().streaming ? get().activeId : null;
+    const recoveryMessageRevision = conversationMessageRevision;
+    if (interruptedId) {
+      supersedeActiveRequest();
+      set({ streaming: false, activeToolCalls: [], activeAgentEvents: [], error: null });
+    }
+    let conv: Conversation;
+    try {
+      conv = await api.importConversation(payload);
+    } catch (error: any) {
+      if (interruptedId && get().activeId === interruptedId) {
+        try {
+          const canRecover = () =>
+            recoveryMessageRevision === conversationMessageRevision && !get().streaming;
+          await refreshActiveMessages(interruptedId, get, set, canRecover);
+        } catch {}
+      }
+      set({ error: error?.message ?? "Failed to import conversation." });
+      throw error;
+    }
+    conversationMutationRevision += 1;
     set((s) => ({
       conversations: [conv, ...s.conversations],
       activeId: conv.id,
@@ -219,28 +339,48 @@ export const useChat = create<ChatState>((set, get) => ({
       activeToolCalls: [],
       activeAgentEvents: [],
       error: null,
+      streaming: false,
       openTabs: s.openTabs.includes(conv.id) ? s.openTabs : [conv.id, ...s.openTabs],
     }));
-    const detail = await api.getConversation(conv.id);
-    set({ messages: detail.messages });
+    await refreshActiveMessages(conv.id, get, set);
     return conv;
   },
 
 
   async createConversation(init) {
+    const interruptedId = get().streaming ? get().activeId : null;
+    const recoveryMessageRevision = conversationMessageRevision;
+    if (interruptedId) {
+      supersedeActiveRequest();
+      set({ streaming: false, activeToolCalls: [], activeAgentEvents: [], error: null });
+    }
     // Inherit the user's last-picked defaults so a brand-new chat
     // starts with the same provider / model / agent / reasoning-depth
     // / show-thinking as their previous one, instead of silently
     // dropping back to mock. Explicit `init` overrides win.
     const ui = useUiDefaults.getState();
-    const conv = await api.createConversation({
-      provider: init?.provider ?? ui.provider,
-      model: init?.model ?? ui.model,
-      title: init?.title,
-      agentId: init?.agentId ?? ui.agentId ?? null,
-      reasoningEffort: init?.reasoningEffort ?? ui.reasoningEffort ?? null,
-      showThinking: init?.showThinking ?? ui.showThinking ?? true,
-    });
+    let conv: Conversation;
+    try {
+      conv = await api.createConversation({
+        provider: init?.provider ?? ui.provider,
+        model: init?.model ?? ui.model,
+        title: init?.title,
+        agentId: init?.agentId ?? ui.agentId ?? null,
+        reasoningEffort: init?.reasoningEffort ?? ui.reasoningEffort ?? null,
+        showThinking: init?.showThinking ?? ui.showThinking ?? true,
+      });
+    } catch (error: any) {
+      if (interruptedId && get().activeId === interruptedId) {
+        try {
+          const canRecover = () =>
+            recoveryMessageRevision === conversationMessageRevision && !get().streaming;
+          await refreshActiveMessages(interruptedId, get, set, canRecover);
+        } catch {}
+      }
+      set({ error: error?.message ?? "Failed to create conversation." });
+      throw error;
+    }
+    conversationMutationRevision += 1;
     set((s) => ({
       conversations: [conv, ...s.conversations],
       activeId: conv.id,
@@ -254,29 +394,48 @@ export const useChat = create<ChatState>((set, get) => ({
   },
 
   async selectConversation(id) {
-    if (get().streaming) get().stop();
+    if (id === get().activeId) return;
+    if (get().streaming) supersedeActiveRequest();
     set((s) => ({
       activeId: id,
       messages: [],
       error: null,
       activeToolCalls: [],
       activeAgentEvents: [],
+      streaming: false,
       // Selecting a sidebar entry (or anything that focuses a
       // conversation) pins its tab in the header so the user can
       // switch back to it without re-opening from the sidebar.
       openTabs: id == null || s.openTabs.includes(id) ? s.openTabs : [id, ...s.openTabs],
     }));
     if (!id) return;
-    const detail = await api.getConversation(id);
-    set({ messages: detail.messages });
+    await refreshActiveMessages(id, get, set);
   },
 
   async deleteConversation(id) {
     // Abort any in-flight stream that belongs to this conversation
     // before removing it so we don't try to persist a message into a
     // conversation row that no longer exists.
-    if (get().activeId === id && get().streaming) get().stop();
-    await api.deleteConversation(id);
+    const interrupted = get().activeId === id && get().streaming;
+    const recoveryMessageRevision = conversationMessageRevision;
+    if (interrupted) {
+      supersedeActiveRequest();
+      set({ streaming: false, activeToolCalls: [], activeAgentEvents: [], error: null });
+    }
+    try {
+      await api.deleteConversation(id);
+    } catch (error: any) {
+      if (interrupted && get().activeId === id) {
+        try {
+          const canRecover = () =>
+            recoveryMessageRevision === conversationMessageRevision && !get().streaming;
+          await refreshActiveMessages(id, get, set, canRecover);
+        } catch {}
+      }
+      set({ error: error?.message ?? "Failed to delete conversation." });
+      throw error;
+    }
+    conversationMutationRevision += 1;
     set((s) => ({
       conversations: s.conversations.filter((c) => c.id !== id),
       activeId: s.activeId === id ? null : s.activeId,
@@ -284,12 +443,14 @@ export const useChat = create<ChatState>((set, get) => ({
       activeToolCalls: s.activeId === id ? [] : s.activeToolCalls,
       activeAgentEvents: s.activeId === id ? [] : s.activeAgentEvents,
       error: s.activeId === id ? null : s.error,
+      streaming: s.activeId === id ? false : s.streaming,
       openTabs: s.openTabs.filter((x) => x !== id),
     }));
   },
 
   async renameConversation(id, title) {
     await api.updateConversation(id, { title });
+    conversationMutationRevision += 1;
     set((s) => ({
       conversations: s.conversations.map((c) => (c.id === id ? { ...c, title } : c)),
     }));
@@ -297,41 +458,98 @@ export const useChat = create<ChatState>((set, get) => ({
 
   async updateConversationSettings(id, patch) {
     const updated = await api.updateConversation(id, patch);
+    conversationMutationRevision += 1;
     set((s) => ({
       conversations: s.conversations.map((c) => (c.id === id ? updated : c)),
     }));
   },
 
   async applyGlobalSettings(patch) {
-    // The server is authoritative for the row state, but the
-    // server's response only contains the fields it knows about
-    // (provider / model / agent / reasoningEffort / showThinking
-    // + ids + timestamps). We merge the patch into every cached
-    // row by id so the UI updates instantly without waiting for
-    // the round-trip — the subsequent `set` from the server
-    // response just confirms what we already showed.
+    const before = new Map(get().conversations.map((conversation) => [conversation.id, conversation]));
+    const fields = Object.keys(patch) as Array<keyof typeof patch>;
+    const revision = ++globalSettingsRevision;
+    conversationMutationRevision += 1;
+    for (const field of fields) globalSettingsFieldRevision.set(field, revision);
     set((s) => ({
       conversations: s.conversations.map((c) => ({ ...c, ...patch })),
     }));
-    const updated = await api.applyGlobalConversationSettings(patch);
-    if (updated.length) {
-      set((s) => {
-        // Build a lookup so we overwrite the optimistic values
-        // with whatever the server actually persisted (handles
-        // nulling fields, server-side normalization, etc.).
-        const byId = new Map(updated.map((c) => [c.id, c]));
-        return {
-          conversations: s.conversations.map((c) => byId.get(c.id) ?? c),
-        };
-      });
+
+    const operation = globalSettingsQueue.then(async () => {
+      const updated = await api.applyGlobalConversationSettings(patch);
+      const byId = new Map(updated.map((conversation) => [conversation.id, conversation]));
+      set((state) => ({
+        conversations: state.conversations.map((conversation) => {
+          const server = byId.get(conversation.id);
+          if (!server) return conversation;
+          const next = { ...conversation };
+          for (const field of fields) {
+            // A newer optimistic write to the same field wins over this older response.
+            if (globalSettingsFieldRevision.get(field) === revision) {
+              (next as any)[field] = server[field];
+            }
+          }
+          next.updatedAt = Math.max(next.updatedAt, server.updatedAt);
+          return next;
+        }),
+      }));
+    });
+    globalSettingsQueue = operation.catch(() => {});
+
+    try {
+      await operation;
+    } catch (error: any) {
+      let canonical: Conversation[] | null = null;
+      try {
+        canonical = await api.listConversations();
+      } catch {}
+      const canonicalById = new Map(
+        (canonical ?? []).map((conversation) => [conversation.id, conversation]),
+      );
+      const current = get();
+      const defaultsSource =
+        canonicalById.get(current.activeId ?? "") ?? canonical?.[0] ??
+        (current.activeId ? before.get(current.activeId) : undefined) ?? before.values().next().value;
+      const defaultsPatch: Partial<UiDefaults> = {};
+      for (const field of fields) {
+        if (globalSettingsFieldRevision.get(field) !== revision || !defaultsSource) continue;
+        if (field === "provider") defaultsPatch.provider = defaultsSource.provider;
+        else if (field === "model") defaultsPatch.model = defaultsSource.model;
+        else if (field === "agentId") defaultsPatch.agentId = defaultsSource.agentId ?? null;
+        else if (field === "reasoningEffort") {
+          defaultsPatch.reasoningEffort =
+            (defaultsSource.reasoningEffort as UiReasoningEffort) ?? null;
+        } else if (field === "showThinking") {
+          defaultsPatch.showThinking = defaultsSource.showThinking ?? true;
+        }
+      }
+      if (Object.keys(defaultsPatch).length > 0) {
+        useUiDefaults.getState().hydrate(defaultsPatch);
+      }
+      set((state) => ({
+        error: error?.message ?? "Failed to save conversation settings.",
+        conversations: state.conversations.map((conversation) => {
+          const source = canonicalById.get(conversation.id) ?? before.get(conversation.id);
+          if (!source) return conversation;
+          const next = { ...conversation };
+          for (const field of fields) {
+            if (globalSettingsFieldRevision.get(field) === revision) {
+              (next as any)[field] = source[field];
+            }
+          }
+          return next;
+        }),
+      }));
     }
   },
 
   async deleteMessage(id) {
     const activeId = get().activeId;
     if (!activeId) return;
-    await api.deleteMessage(activeId, id);
-    set((s) => ({ messages: s.messages.filter((m) => m.id !== id) }));
+    const deletedIds = new Set(await api.deleteMessage(activeId, id));
+    if (get().activeId !== activeId) return;
+    conversationMutationRevision += 1;
+    conversationMessageRevision += 1;
+    set((s) => ({ messages: s.messages.filter((message) => !deletedIds.has(message.id)) }));
   },
 
   resetActivity() {
@@ -381,9 +599,8 @@ export const useChat = create<ChatState>((set, get) => ({
   },
 
   stop() {
-    currentAbort?.abort();
-    currentAbort = null;
-    set({ streaming: false });
+    const request = activeRequest;
+    if (request) abortChatRequest(request);
   },
 
   async sendMessage(content, opts) {
@@ -397,22 +614,40 @@ export const useChat = create<ChatState>((set, get) => ({
     let working: ChatMessage[] = messages;
 
     if (opts?.regenerate) {
-      while (working.length && working[working.length - 1].role === "assistant") {
-        working = working.slice(0, -1);
+      const lastUserIndex = working.map((message) => message.role).lastIndexOf("user");
+      if (lastUserIndex === -1) {
+        set({ streaming: false, error: "There is no user message to regenerate." });
+        return;
       }
-    } else if (opts?.editLastUser) {
-      if (working.length && working[working.length - 1].role === "user") {
-        working = working.slice(0, -1);
+      working = working.slice(0, lastUserIndex + 1);
+    } else if (opts?.editMessageId) {
+      const targetIndex = working.findIndex(
+        (message) => message.id === opts.editMessageId && message.role === "user",
+      );
+      if (targetIndex === -1) {
+        set({ streaming: false, error: "The message being edited is no longer available." });
+        return;
       }
       working = [
-        ...working,
+        ...working.slice(0, targetIndex),
         {
-          id: `local-${Date.now()}`,
-          conversationId: activeId,
-          role: "user",
+          ...working[targetIndex],
+          content,
+          parts: opts.parts ?? null,
+        },
+      ];
+    } else if (opts?.editLastUser) {
+      const targetIndex = working.map((message) => message.role).lastIndexOf("user");
+      if (targetIndex === -1) {
+        set({ streaming: false, error: "There is no user message to edit." });
+        return;
+      }
+      working = [
+        ...working.slice(0, targetIndex),
+        {
+          ...working[targetIndex],
           content,
           parts: opts?.parts ?? null,
-          createdAt: Date.now(),
         },
       ];
     } else {
@@ -439,55 +674,92 @@ export const useChat = create<ChatState>((set, get) => ({
         createdAt: Date.now(),
       },
     ];
+    conversationMutationRevision += 1;
+    conversationMessageRevision += 1;
     set({ messages: working });
 
     const ac = new AbortController();
-    currentAbort = ac;
+    const serverRequestId = createServerRequestId();
+    const request: ActiveChatRequest = {
+      id: ++requestSequence,
+      conversationId: activeId,
+      serverRequestId,
+      controller: ac,
+    };
+    activeRequest = request;
+    const ownsRequest = () => activeRequest?.id === request.id;
+    let shouldReconcile = false;
+    let pendingFrame: number | null = null;
 
     try {
       let acc = "";
       let accReasoning = "";
+      const flushStreamingDraft = () => {
+        pendingFrame = null;
+        if (!ownsRequest()) return;
+        set((state) => {
+          const index = state.messages.findIndex((message) => message.id === placeholderId);
+          if (index === -1) return state;
+          const current = state.messages[index];
+          const nonReasoning = (current.parts ?? []).filter((part) => part.type !== "reasoning");
+          const parts: ChatMessage["parts"] = accReasoning
+            ? [{ type: "reasoning", text: accReasoning }, ...nonReasoning]
+            : nonReasoning.length
+              ? nonReasoning
+              : null;
+          const nextMessages = state.messages.slice();
+          nextMessages[index] = { ...current, content: acc, parts };
+          return { messages: nextMessages };
+        });
+      };
+      const scheduleStreamingDraft = () => {
+        if (pendingFrame === null) {
+          pendingFrame = window.requestAnimationFrame(flushStreamingDraft);
+        }
+      };
+      const cancelStreamingDraft = () => {
+        if (pendingFrame !== null) {
+          window.cancelAnimationFrame(pendingFrame);
+          pendingFrame = null;
+        }
+      };
       for await (const ev of api.streamChat(
         {
           conversationId: activeId,
+          requestId: serverRequestId,
           content,
           parts: opts?.parts ?? undefined,
           regenerate: opts?.regenerate,
           editLastUser: opts?.editLastUser,
+          editMessageId: opts?.editMessageId,
           useTools: opts?.useTools,
           reasoningEffort: opts?.reasoningEffort,
           showThinking: opts?.showThinking,
         },
         ac.signal,
         {
-          onToolCall: (call) => get().pushToolCall(call),
-          onToolResult: (r) => get().resolveToolCall(r.toolCallId, r.content, r.isError, r.agentId),
-          onAgentEvent: (e) => get().pushAgentEvent(e),
+          onToolCall: (call) => {
+            if (ownsRequest()) get().pushToolCall(call);
+          },
+          onToolResult: (r) => {
+            if (ownsRequest()) {
+              get().resolveToolCall(r.toolCallId, r.content, r.isError, r.agentId);
+            }
+          },
+          onAgentEvent: (e) => {
+            if (ownsRequest()) get().pushAgentEvent(e);
+          },
         },
       )) {
+        if (!ownsRequest()) continue;
         if (ev.type === "delta") {
           acc += ev.text;
-          set((s) => ({
-            messages: s.messages.map((m) =>
-              m.id === placeholderId ? { ...m, content: acc } : m,
-            ),
-          }));
+          scheduleStreamingDraft();
         } else if (ev.type === "reasoning_delta") {
           accReasoning += ev.text;
-          // Stage the live reasoning trace on the placeholder so the UI
-          // can render a streaming thinking block. The server will rewrite
-          // the parts blob on `message`.
-          set((s) => ({
-            messages: s.messages.map((m) => {
-              if (m.id !== placeholderId) return m;
-              const parts: NonNullable<ChatMessage["parts"]> = (
-                (m.parts ?? []) as NonNullable<ChatMessage["parts"]>
-              ).filter((p) => p.type !== "reasoning");
-              parts.unshift({ type: "reasoning", text: accReasoning });
-              return { ...m, parts };
-            }),
-          }));
+          scheduleStreamingDraft();
         } else if (ev.type === "message") {
+          cancelStreamingDraft();
           set((s) => ({
             messages: s.messages.map((m) =>
               m.id === placeholderId
@@ -495,8 +767,11 @@ export const useChat = create<ChatState>((set, get) => ({
                     ...m,
                     id: ev.message.id,
                     content: ev.message.content || acc,
+                    parts: ev.message.parts ?? m.parts ?? null,
+                    toolCallIds: ev.message.toolCallIds ?? null,
                     promptTokens: ev.message.promptTokens,
                     completionTokens: ev.message.completionTokens,
+                    createdAt: ev.message.createdAt,
                   }
                 : m,
             ),
@@ -510,19 +785,33 @@ export const useChat = create<ChatState>((set, get) => ({
             ),
           }));
         } else if (ev.type === "error") {
-          set({ error: ev.message });
+          if (!(ac.signal.aborted && ev.message === "aborted")) {
+            set({ error: ev.message });
+          }
+          shouldReconcile = true;
         } else if (ev.type === "done") {
-          void get().loadConversations();
+          cancelStreamingDraft();
+          await get().loadConversations();
+          await refreshActiveMessages(activeId, get, set, ownsRequest);
         }
       }
     } catch (err: any) {
-      if (err?.name !== "AbortError") {
+      shouldReconcile = true;
+      if (ownsRequest() && err?.name !== "AbortError") {
         set({ error: err?.message ?? "Stream failed" });
       }
     } finally {
-      currentAbort = null;
+      if (pendingFrame !== null) window.cancelAnimationFrame(pendingFrame);
+      if (!ownsRequest()) return;
+      if (shouldReconcile && get().activeId === request.conversationId) {
+        try {
+          await refreshActiveMessages(activeId, get, set, ownsRequest);
+        } catch {}
+      }
+      if (!ownsRequest()) return;
+      activeRequest = null;
       set({ streaming: false });
     }
   },
 }));
-import type { ReasoningEffort as UiReasoningEffort } from "@/store/ui-defaults";
+import type { ReasoningEffort as UiReasoningEffort, UiDefaults } from "@/store/ui-defaults";

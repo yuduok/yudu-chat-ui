@@ -10,7 +10,15 @@ import { dataDir } from "../data-dir.js";
 const dbPath = path.join(dataDir, "yudu-chat.db");
 
 const sqlite = new Database(dbPath);
+try { fs.chmodSync(dbPath, 0o600); } catch {}
+sqlite.pragma("foreign_keys = ON");
 sqlite.pragma("journal_mode = WAL");
+for (const suffix of ["-wal", "-shm"]) {
+  const artifact = `${dbPath}${suffix}`;
+  if (fs.existsSync(artifact)) {
+    try { fs.chmodSync(artifact, 0o600); } catch {}
+  }
+}
 
 export const db = drizzle(sqlite, { schema });
 export { schema, dataDir };

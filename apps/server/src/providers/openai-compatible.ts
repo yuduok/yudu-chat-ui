@@ -95,6 +95,7 @@ export class OpenAICompatibleProvider implements ChatProvider {
       name: string;
       args: string;
     }> = [];
+    let toolCallsEmitted = false;
 
     try {
       while (true) {
@@ -115,7 +116,9 @@ export class OpenAICompatibleProvider implements ChatProvider {
               // Flush any remaining tool calls. Most upstreams only set
               // finish_reason=tool_calls; if we somehow accumulated a call
               // that didn't get emitted during the loop, emit it now.
-              for (const c of parsedCalls(calls)) yield { delta: "", toolCall: c };
+              if (!toolCallsEmitted) {
+                for (const c of parsedCalls(calls)) yield { delta: "", toolCall: c };
+              }
               return;
             }
             if (!payload) continue;
@@ -158,8 +161,13 @@ export class OpenAICompatibleProvider implements ChatProvider {
               }
               const finish = choice?.finish_reason;
               if (finish === "tool_calls") {
-                for (const c of parsedCalls(calls)) yield { delta: "", toolCall: c };
-                return;
+                if (!toolCallsEmitted) {
+                  for (const c of parsedCalls(calls)) yield { delta: "", toolCall: c };
+                  toolCallsEmitted = true;
+                }
+                // OpenAI sends include_usage as a separate chunk after the
+                // finish marker. Keep reading until usage/[DONE] instead of
+                // returning with every tool round incorrectly recorded as 0.
               }
               if (json.usage) {
                 yield {
@@ -175,6 +183,9 @@ export class OpenAICompatibleProvider implements ChatProvider {
             }
           }
         }
+      }
+      if (!toolCallsEmitted) {
+        for (const c of parsedCalls(calls)) yield { delta: "", toolCall: c };
       }
     } finally {
       reader.releaseLock();

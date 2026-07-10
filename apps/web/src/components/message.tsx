@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import {
   AlertTriangle,
   Bot,
@@ -26,7 +26,7 @@ import { useI18n } from "@/i18n";
 import type { ChatMessage as Msg, ContentPart } from "@yudu/shared";
 import { cn } from "@/lib/utils";
 
-export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
+export const MessageBubble = memo(function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
   const { t } = useI18n();
   const send = useChat((s) => s.sendMessage);
   const del = useChat((s) => s.deleteMessage);
@@ -59,6 +59,7 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
               <button
                 className="rounded p-1 hover:bg-foreground/10"
                 onClick={() => del(msg.id)}
+                disabled={streaming}
                 aria-label={t("message.delete")}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -87,7 +88,7 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
         )}
       >
         {editing ? (
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <Textarea value={draft} onChange={(e) => setDraft(e.target.value)} className="min-h-[80px]" />
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
@@ -99,20 +100,21 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
                   setEditing(false);
                   const attachmentParts = (msg.parts ?? []).filter((part) => part.type !== "text");
                   await send(draft, {
-                    editLastUser: true,
+                    editMessageId: msg.id,
                     parts: [
                       ...(draft.trim() ? [{ type: "text", text: draft.trim() } as ContentPart] : []),
                       ...attachmentParts,
                     ],
                   });
                 }}
+                disabled={streaming}
               >
                 {t("message.edit")}
               </Button>
             </div>
           </div>
         ) : isAssistant ? (
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             {msg.parts?.some((p) => p.type === "tool_call") && (
               <ToolCallChips parts={msg.parts} />
             )}
@@ -120,14 +122,14 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
             {msg.content ? <Markdown>{msg.content}</Markdown> : null}
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <AttachmentGrid parts={msg.parts} />
             {msg.content ? <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">{msg.content}</div> : null}
           </div>
         )}
 
         {/* Footer: tokens + actions */}
-        {(isAssistant || isUser) && (
+        {!editing && (isAssistant || isUser) && (
           <div
             className={cn(
               "mt-2 flex items-center gap-1 text-[11px] opacity-70",
@@ -165,6 +167,7 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
                         setDraft(msg.content);
                         setEditing(true);
                       }}
+                      disabled={streaming}
                       aria-label={t("message.edit")}
                     >
                       <Pencil className="h-3.5 w-3.5" />
@@ -193,6 +196,7 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
                   <button
                     className="rounded p-1 hover:bg-foreground/10"
                     onClick={() => del(msg.id)}
+                    disabled={streaming}
                     aria-label={t("message.delete")}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -211,7 +215,7 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
       )}
     </div>
   );
-}
+});
 
 function AttachmentGrid({ parts }: { parts?: Msg["parts"] | null }) {
   const attachments = (parts ?? []).filter(

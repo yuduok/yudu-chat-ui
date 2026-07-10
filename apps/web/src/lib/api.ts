@@ -15,25 +15,110 @@ import type {
   UsageReport,
 } from "@yudu/shared";
 
-// Resolve API base:在 Tauri 桌面模式下直接走 loopback 端口(与 WebView 不同 origin);
-// Web 模式下保留相对路径 /api,由 Vite 代理到 127.0.0.1:8787。
-function resolveApiBase(): string {
-  if (typeof window !== "undefined") {
-    const w = window as unknown as { __TAURI_INTERNALS__?: unknown; __TAURI__?: unknown };
-    if (w.__TAURI_INTERNALS__ || w.__TAURI__) return "http://127.0.0.1:8787/api";
-  }
-  return "/api";
+// Web uses the same-origin Vite proxy. The desktop build asks the Tauri shell
+// which loopback port its sidecar actually owns, then waits for the health
+// endpoint before releasing the first API request.
+let cachedBase = "/api";
+let basePromise: Promise<string> | null = null;
+
+interface DesktopServerStatus {
+  running: boolean;
+  port: number;
+  healthToken: string;
 }
-const BASE = resolveApiBase();
+
+function isTauriRuntime(): boolean {
+  if (typeof window === "undefined") return false;
+  const runtime = window as unknown as {
+    __TAURI_INTERNALS__?: unknown;
+    __TAURI__?: unknown;
+  };
+  return Boolean(runtime.__TAURI_INTERNALS__ || runtime.__TAURI__);
+}
+
+async function resolveApiBase(): Promise<string> {
+  if (!isTauriRuntime()) return cachedBase;
+  if (basePromise) return basePromise;
+  basePromise = (async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      try {
+        const status = await invoke<DesktopServerStatus>("server_status");
+        if (!status.running) {
+          lastError = new Error("desktop sidecar is not running yet");
+          await new Promise((resolve) => window.setTimeout(resolve, 100));
+          continue;
+        }
+        if (!Number.isInteger(status.port) || status.port < 1 || status.port > 65535) {
+          throw new Error(`Desktop sidecar returned an invalid port: ${status.port}`);
+        }
+        const base = `http://127.0.0.1:${status.port}/api`;
+        const healthController = new AbortController();
+        const healthTimeout = window.setTimeout(() => healthController.abort(), 750);
+        let response: Response;
+        let payload: { ok?: boolean; token?: string } | null;
+        try {
+          response = await fetch(`${base}/health`, {
+            cache: "no-store",
+            headers: status.healthToken
+              ? { "x-yudu-health-token": status.healthToken }
+              : undefined,
+            signal: healthController.signal,
+          });
+          payload = await response.json().catch(() => null) as {
+            ok?: boolean;
+            token?: string;
+          } | null;
+        } finally {
+          window.clearTimeout(healthTimeout);
+        }
+        const tokenMatches = !status.healthToken || payload?.token === status.healthToken;
+        if (response.ok && payload?.ok === true && tokenMatches) {
+          cachedBase = base;
+          return base;
+        }
+        lastError = new Error(`health check failed or identity mismatched: ${response.status}`);
+      } catch (error) {
+        lastError = error;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+    }
+    throw new Error(`Desktop sidecar did not become ready: ${String(lastError)}`);
+  })().catch((error) => {
+    basePromise = null;
+    throw error;
+  });
+  return basePromise;
+}
+
+async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  const base = await resolveApiBase();
+  try {
+    return await fetch(`${base}${path}`, init);
+  } catch (error) {
+    if (!isTauriRuntime() || init?.signal?.aborted) throw error;
+    // A release sidecar may reselect its port after an early bind failure.
+    // Refresh status instead of pinning later requests to stale state. Only
+    // replay read-only requests: a failed POST may already have committed and
+    // retrying it could duplicate conversations, messages, or image jobs.
+    cachedBase = "/api";
+    basePromise = null;
+    const method = (init?.method ?? "GET").toUpperCase();
+    if (method !== "GET" && method !== "HEAD") throw error;
+    const retryBase = await resolveApiBase();
+    return fetch(`${retryBase}${path}`, init);
+  }
+}
 
 export function apiAssetUrl(url: string): string {
   if (/^https?:\/\//.test(url)) return url;
-  if (BASE === "/api") return url;
-  return `${BASE.replace(/\/api$/, "")}${url}`;
+  if (cachedBase === "/api") return url;
+  return `${cachedBase.replace(/\/api$/, "")}${url}`;
 }
 
 export async function listConversations(): Promise<Conversation[]> {
-  const r = await fetch(`${BASE}/conversations`);
+  const r = await apiFetch("/conversations");
   if (!r.ok) throw new Error("listConversations failed");
   return r.json();
 }
@@ -48,7 +133,7 @@ export async function createConversation(input: {
   reasoningEffort?: "low" | "medium" | "high" | "xhigh" | null;
   showThinking?: boolean | null;
 }): Promise<Conversation> {
-  const r = await fetch(`${BASE}/conversations`, {
+  const r = await apiFetch("/conversations", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
@@ -58,7 +143,7 @@ export async function createConversation(input: {
 }
 
 export async function getConversation(id: string): Promise<ConversationWithMessages> {
-  const r = await fetch(`${BASE}/conversations/${id}`);
+  const r = await apiFetch(`/conversations/${id}`);
   if (!r.ok) throw new Error("getConversation failed");
   return r.json();
 }
@@ -79,7 +164,7 @@ export async function updateConversation(
     >
   >,
 ): Promise<Conversation> {
-  const r = await fetch(`${BASE}/conversations/${id}`, {
+  const r = await apiFetch(`/conversations/${id}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
@@ -101,7 +186,7 @@ export async function applyGlobalConversationSettings(
     >
   >,
 ): Promise<Conversation[]> {
-  const r = await fetch(`${BASE}/conversations/all`, {
+  const r = await apiFetch("/conversations/all", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
@@ -112,18 +197,31 @@ export async function applyGlobalConversationSettings(
 }
 
 export async function deleteConversation(id: string): Promise<void> {
-  await fetch(`${BASE}/conversations/${id}`, { method: "DELETE" });
+  const r = await apiFetch(`/conversations/${id}`, { method: "DELETE" });
+  if (!r.ok) throw new Error("deleteConversation failed");
 }
 
-export async function deleteMessage(conversationId: string, messageId: string): Promise<void> {
-  await fetch(`${BASE}/conversations/${conversationId}/messages/${messageId}`, { method: "DELETE" });
+export async function deleteMessage(conversationId: string, messageId: string): Promise<string[]> {
+  const r = await apiFetch(`/conversations/${conversationId}/messages/${messageId}`, { method: "DELETE" });
+  if (!r.ok) throw new Error("deleteMessage failed");
+  const payload = await r.json() as { deletedIds?: string[] };
+  return payload.deletedIds ?? [messageId];
+}
+
+export async function cancelChat(requestId: string): Promise<void> {
+  const r = await apiFetch("/chat/cancel", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ requestId }),
+  });
+  if (!r.ok) throw new Error("cancelChat failed");
 }
 
 // Fetch the full exported JSON document for a conversation. Returns the
 // raw JSON text so the client can either save it as-is or transform it
 // (markdown / png) before download.
 export async function exportConversation(id: string): Promise<ExportedConversation> {
-  const r = await fetch(`${BASE}/conversations/${id}/export`);
+  const r = await apiFetch(`/conversations/${id}/export`);
   if (!r.ok) throw new Error("exportConversation failed");
   return r.json();
 }
@@ -131,7 +229,7 @@ export async function exportConversation(id: string): Promise<ExportedConversati
 // Send a previously-downloaded JSON export to the server. Returns the
 // newly-created conversation row.
 export async function importConversation(payload: unknown): Promise<Conversation> {
-  const r = await fetch(`${BASE}/conversations/import`, {
+  const r = await apiFetch("/conversations/import", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -149,13 +247,13 @@ export async function importConversation(payload: unknown): Promise<Conversation
 }
 
 export async function listProviders(): Promise<ProviderConfig[]> {
-  const r = await fetch(`${BASE}/providers`);
+  const r = await apiFetch("/providers");
   if (!r.ok) throw new Error("listProviders failed");
   return r.json();
 }
 
 export async function listAgents(): Promise<AgentProfile[]> {
-  const r = await fetch(`${BASE}/agents`);
+  const r = await apiFetch("/agents");
   if (!r.ok) throw new Error("listAgents failed");
   return r.json();
 }
@@ -163,26 +261,26 @@ export async function listAgents(): Promise<AgentProfile[]> {
 export async function uploadAttachment(file: File): Promise<ContentPart> {
   const form = new FormData();
   form.append("file", file);
-  const r = await fetch(`${BASE}/uploads`, { method: "POST", body: form });
+  const r = await apiFetch("/uploads", { method: "POST", body: form });
   if (!r.ok) throw new Error((await r.text().catch(() => "")) || "upload failed");
   const payload = await r.json() as { attachment: ContentPart };
   return payload.attachment;
 }
 
 export async function getImageCapabilities(): Promise<Array<{ provider: string; label?: string; capabilities: ImageGenerationCapabilities }>> {
-  const r = await fetch(`${BASE}/images/capabilities`);
+  const r = await apiFetch("/images/capabilities");
   if (!r.ok) throw new Error("getImageCapabilities failed");
   return r.json();
 }
 
 export async function listImageGenerations(): Promise<ImageGeneration[]> {
-  const r = await fetch(`${BASE}/images/generations`);
+  const r = await apiFetch("/images/generations");
   if (!r.ok) throw new Error("listImageGenerations failed");
   return r.json();
 }
 
 export async function createImageGeneration(input: ImageGenerationRequest, signal?: AbortSignal): Promise<ImageGeneration> {
-  const r = await fetch(`${BASE}/images/generations`, {
+  const r = await apiFetch("/images/generations", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
@@ -196,7 +294,7 @@ export async function createImageGeneration(input: ImageGenerationRequest, signa
 }
 
 export async function deleteImageGeneration(id: string): Promise<void> {
-  const r = await fetch(`${BASE}/images/generations/${id}`, { method: "DELETE" });
+  const r = await apiFetch(`/images/generations/${id}`, { method: "DELETE" });
   if (!r.ok) throw new Error("deleteImageGeneration failed");
 }
 
@@ -215,7 +313,7 @@ export async function getProviderModels(
   opts: { remote?: boolean } = {},
 ): Promise<ProviderModels> {
   const qs = opts.remote ? "?remote=1" : "";
-  const r = await fetch(`${BASE}/providers/${encodeURIComponent(id)}/models${qs}`);
+  const r = await apiFetch(`/providers/${encodeURIComponent(id)}/models${qs}`);
   if (!r.ok) throw new Error("getProviderModels failed");
   return r.json();
 }
@@ -228,7 +326,7 @@ export interface Settings {
 }
 
 export async function getSettings(): Promise<Settings> {
-  const r = await fetch(`${BASE}/settings`);
+  const r = await apiFetch("/settings");
   if (!r.ok) throw new Error("getSettings failed");
   return r.json();
 }
@@ -239,7 +337,7 @@ export async function saveSettings(input: {
   ui?: { theme?: "light" | "dark" | "system" };
   skills?: { enabled?: boolean };
 }): Promise<Settings> {
-  const r = await fetch(`${BASE}/settings`, {
+  const r = await apiFetch("/settings", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
@@ -249,13 +347,13 @@ export async function saveSettings(input: {
 }
 
 export async function listSkills(): Promise<SkillDefinition[]> {
-  const r = await fetch(`${BASE}/skills`);
+  const r = await apiFetch("/skills");
   if (!r.ok) throw new Error("listSkills failed");
   return r.json();
 }
 
 export async function importSkill(input: { name: string; description?: string; content: string }): Promise<SkillDefinition> {
-  const r = await fetch(`${BASE}/skills`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+  const r = await apiFetch("/skills", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
   if (!r.ok) throw new Error((await r.text().catch(() => "")) || "importSkill failed");
   return r.json();
 }
@@ -263,26 +361,26 @@ export async function importSkill(input: { name: string; description?: string; c
 export async function importSkillFile(file: File): Promise<SkillDefinition> {
   const body = new FormData();
   body.append("file", file);
-  const r = await fetch(`${BASE}/skills/import`, { method: "POST", body });
+  const r = await apiFetch("/skills/import", { method: "POST", body });
   if (!r.ok) throw new Error((await r.text().catch(() => "")) || "importSkillFile failed");
   return r.json();
 }
 
 export async function setSkillEnabled(id: string, enabled: boolean): Promise<SkillDefinition> {
-  const r = await fetch(`${BASE}/skills/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }) });
+  const r = await apiFetch(`/skills/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }) });
   if (!r.ok) throw new Error("setSkillEnabled failed");
   return r.json();
 }
 
 export async function deleteSkill(id: string): Promise<void> {
-  const r = await fetch(`${BASE}/skills/${encodeURIComponent(id)}`, { method: "DELETE" });
+  const r = await apiFetch(`/skills/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (!r.ok) throw new Error("deleteSkill failed");
 }
 
 // Aggregate token usage across every persisted conversation. Token counts
 // come from assistant messages only (user / tool / system never carry them).
 export async function getUsage(): Promise<UsageReport> {
-  const r = await fetch(`${BASE}/usage`);
+  const r = await apiFetch("/usage");
   if (!r.ok) throw new Error("getUsage failed");
   return r.json();
 }
@@ -313,7 +411,7 @@ export async function* streamChat(
   signal: AbortSignal,
   callbacks: StreamCallbacks = {},
 ): AsyncGenerator<StreamEvent, void, void> {
-  const r = await fetch(`${BASE}/chat`, {
+  const r = await apiFetch("/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(req),

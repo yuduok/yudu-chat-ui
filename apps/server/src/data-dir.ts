@@ -7,4 +7,9 @@ export const dataDir = process.env.YUDU_DATA_DIR ?? (isDesktop
   ? path.join(os.homedir(), ".yudu-chat")
   : path.resolve(process.cwd(), "data"));
 
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+try {
+  fs.chmodSync(dataDir, 0o700);
+} catch {
+  // Some platforms/filesystems do not expose POSIX modes.
+}

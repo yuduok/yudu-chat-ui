@@ -1,9 +1,16 @@
-import { ChatPage } from "@/pages/chat-page";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "sonner";
 import { useTheme } from "@/hooks/use-theme";
-import { ImageGenerationPage } from "@/pages/image-generation-page";
-import { useEffect, useState } from "react";
+
+const ChatPage = lazy(() =>
+  import("@/pages/chat-page").then((module) => ({ default: module.ChatPage })),
+);
+const ImageGenerationPage = lazy(() =>
+  import("@/pages/image-generation-page").then((module) => ({
+    default: module.ImageGenerationPage,
+  })),
+);
 
 export default function App() {
   const { theme } = useTheme();
@@ -15,8 +22,18 @@ export default function App() {
   }, []);
   return (
     <TooltipProvider delayDuration={200}>
-      {route.startsWith("#/images") ? <ImageGenerationPage /> : <ChatPage />}
+      <Suspense fallback={<AppLoadingState />}>
+        {route.startsWith("#/images") ? <ImageGenerationPage /> : <ChatPage />}
+      </Suspense>
       <Toaster theme={theme === "system" ? undefined : (theme as any)} position="top-right" />
     </TooltipProvider>
+  );
+}
+
+function AppLoadingState() {
+  return (
+    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+      Loading...
+    </div>
   );
 }

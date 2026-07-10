@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { eq, desc } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "../db/index.js";
 import { conversations, messages } from "../db/schema.js";
@@ -85,6 +85,38 @@ function rowToMessage(row: typeof messages.$inferSelect): ChatMessage {
     completionTokens: row.completionTokens,
     createdAt: row.createdAt,
   };
+}
+
+function rowToolCallIds(row: typeof messages.$inferSelect): string[] {
+  if (row.toolCallIds) {
+    try {
+      const parsed = JSON.parse(row.toolCallIds);
+      if (Array.isArray(parsed)) return parsed.filter((id): id is string => typeof id === "string");
+    } catch {}
+  }
+  if (!row.parts) return [];
+  try {
+    const parsed = JSON.parse(row.parts);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((part) => part?.type === "tool_call" && typeof part.id === "string")
+      .map((part) => part.id);
+  } catch {
+    return [];
+  }
+}
+
+function rowToolResultIds(row: typeof messages.$inferSelect): string[] {
+  if (!row.parts) return [];
+  try {
+    const parsed = JSON.parse(row.parts);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((part) => part?.type === "tool_result" && typeof part.toolCallId === "string")
+      .map((part) => part.toolCallId);
+  } catch {
+    return [];
+  }
 }
 
 export async function conversationRoutes(app: FastifyInstance) {
@@ -216,19 +248,65 @@ export async function conversationRoutes(app: FastifyInstance) {
     },
   );
 
-  // Delete a single message
+  // Delete a message. Tool calls and their results form one provider-protocol
+  // group, so deleting any member removes the whole group atomically.
   app.delete<{ Params: { id: string; messageId: string } }>(
     "/api/conversations/:id/messages/:messageId",
-    async (req) => {
+    async (req, reply) => {
       const { id, messageId } = req.params;
-      await db
-        .delete(messages)
-        .where(eq(messages.id, messageId));
-      await db
-        .update(conversations)
-        .set({ updatedAt: Date.now() })
-        .where(eq(conversations.id, id));
-      return { ok: true };
+      const rows = await db
+        .select()
+        .from(messages)
+        .where(eq(messages.conversationId, id))
+        .orderBy(asc(messages.createdAt));
+      const targetIndex = rows.findIndex((row) => row.id === messageId);
+      if (targetIndex < 0) {
+        return reply.code(404).send({ error: "Message not found in conversation" });
+      }
+      const target = rows[targetIndex];
+
+      let toolCallRow: typeof messages.$inferSelect | undefined;
+      if (target.role === "assistant" && rowToolCallIds(target).length > 0) {
+        toolCallRow = target;
+      } else if (target.role === "tool") {
+        const targetResultIds = new Set(rowToolResultIds(target));
+        let assistantIndex = targetIndex - 1;
+        while (assistantIndex >= 0 && rows[assistantIndex].role === "tool") assistantIndex -= 1;
+        const candidate = rows[assistantIndex];
+        if (
+          candidate?.role === "assistant" &&
+          rowToolCallIds(candidate).some((callId) => targetResultIds.has(callId))
+        ) {
+          toolCallRow = candidate;
+        }
+      }
+
+      const deletedIds = new Set<string>([messageId]);
+      if (toolCallRow) {
+        const groupCallIds = new Set(rowToolCallIds(toolCallRow));
+        deletedIds.add(toolCallRow.id);
+        const assistantIndex = rows.indexOf(toolCallRow);
+        for (let index = assistantIndex + 1; index < rows.length; index += 1) {
+          const row = rows[index];
+          if (row.role !== "tool") break;
+          if (
+            rowToolResultIds(row).some((resultId) => groupCallIds.has(resultId))
+          ) {
+            deletedIds.add(row.id);
+          }
+        }
+      }
+
+      db.transaction((tx) => {
+        tx.delete(messages)
+          .where(and(inArray(messages.id, [...deletedIds]), eq(messages.conversationId, id)))
+          .run();
+        tx.update(conversations)
+          .set({ updatedAt: Date.now() })
+          .where(eq(conversations.id, id))
+          .run();
+      });
+      return { ok: true, deletedIds: [...deletedIds] };
     },
   );
 

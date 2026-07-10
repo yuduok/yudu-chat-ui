@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import type { ToolDefinition } from "@yudu/shared";
 import type { ToolHandler } from "./index.js";
-import { assertReadablePath, resolveWorkspacePath } from "./workspace.js";
+import { assertWorkspaceToolPath, resolveWorkspacePath } from "./workspace.js";
 
 const def: ToolDefinition = {
   name: "read_file",
@@ -25,7 +25,7 @@ const handler: ToolHandler = async (args) => {
   const offset = Number.isInteger(input.offset) ? Math.max(1, Number(input.offset)) : 1;
   const limit = Number.isInteger(input.limit) ? Math.min(1000, Math.max(1, Number(input.limit))) : 300;
   const filePath = await resolveWorkspacePath(input.path);
-  assertReadablePath(filePath);
+  assertWorkspaceToolPath(filePath);
   const stat = await fs.stat(filePath);
   if (!stat.isFile()) return { content: `'${input.path}' is not a file`, isError: true };
   if (stat.size > 5_000_000) return { content: "file exceeds the 5 MB read limit", isError: true };
