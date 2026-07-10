@@ -72,3 +72,19 @@ test("OpenAI image provider uses edits endpoint for references", async () => {
     globalThis.fetch = previousFetch;
   }
 });
+
+test("OpenAI image provider forwards abort signals", async () => {
+  const previousFetch = globalThis.fetch;
+  const controller = new AbortController();
+  let receivedSignal: AbortSignal | null | undefined;
+  globalThis.fetch = async (_url, init) => {
+    receivedSignal = init?.signal;
+    return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from("image").toString("base64") }] }), { status: 200 });
+  };
+  try {
+    await new OpenAIImageProvider("openai").generate(baseRequest, { apiKey: "test", signal: controller.signal });
+    assert.equal(receivedSignal, controller.signal);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});

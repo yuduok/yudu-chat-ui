@@ -30,7 +30,10 @@ export const useImageGeneration = create<ImageGenerationState>((set) => ({
       set((state) => ({ items: [item, ...state.items] }));
       return item;
     } catch (error: any) {
-      if (error?.name !== "AbortError") set({ error: error?.message ?? "Image generation failed" });
+      if (error?.name !== "AbortError") {
+        set({ error: error?.message ?? "Image generation failed" });
+        try { set({ items: await api.listImageGenerations() }); } catch {}
+      }
       return null;
     } finally {
       abortController = null;

@@ -84,8 +84,14 @@ export async function imageRoutes(app: FastifyInstance) {
       outputFormat: input.outputFormat,
       background: input.background,
     };
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    req.raw.once("aborted", abort);
+    reply.raw.once("close", () => {
+      if (!reply.raw.writableEnded) controller.abort();
+    });
     try {
-      const output = await provider.generate(input, { apiKey: setting.apiKey, baseUrl: setting.baseUrl });
+      const output = await provider.generate(input, { apiKey: setting.apiKey, baseUrl: setting.baseUrl, signal: controller.signal });
       const assets: GeneratedImageAsset[] = [];
       for (const [index, image] of output.images.entries()) {
         const assetId = nanoid();
@@ -116,6 +122,8 @@ export async function imageRoutes(app: FastifyInstance) {
         status: "failed", images: "[]", error: message, createdAt, completedAt,
       });
       return reply.code(502).send({ error: message, id });
+    } finally {
+      req.raw.removeListener("aborted", abort);
     }
   });
 
