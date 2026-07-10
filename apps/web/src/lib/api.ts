@@ -8,6 +8,9 @@ import type {
   StreamEvent,
   ChatRequest,
   ContentPart,
+  ImageGeneration,
+  ImageGenerationCapabilities,
+  ImageGenerationRequest,
   UsageReport,
 } from "@yudu/shared";
 
@@ -21,6 +24,12 @@ function resolveApiBase(): string {
   return "/api";
 }
 const BASE = resolveApiBase();
+
+export function apiAssetUrl(url: string): string {
+  if (/^https?:\/\//.test(url)) return url;
+  if (BASE === "/api") return url;
+  return `${BASE.replace(/\/api$/, "")}${url}`;
+}
 
 export async function listConversations(): Promise<Conversation[]> {
   const r = await fetch(`${BASE}/conversations`);
@@ -157,6 +166,37 @@ export async function uploadAttachment(file: File): Promise<ContentPart> {
   if (!r.ok) throw new Error((await r.text().catch(() => "")) || "upload failed");
   const payload = await r.json() as { attachment: ContentPart };
   return payload.attachment;
+}
+
+export async function getImageCapabilities(): Promise<Array<{ provider: string; capabilities: ImageGenerationCapabilities }>> {
+  const r = await fetch(`${BASE}/images/capabilities`);
+  if (!r.ok) throw new Error("getImageCapabilities failed");
+  return r.json();
+}
+
+export async function listImageGenerations(): Promise<ImageGeneration[]> {
+  const r = await fetch(`${BASE}/images/generations`);
+  if (!r.ok) throw new Error("listImageGenerations failed");
+  return r.json();
+}
+
+export async function createImageGeneration(input: ImageGenerationRequest, signal?: AbortSignal): Promise<ImageGeneration> {
+  const r = await fetch(`${BASE}/images/generations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!r.ok) {
+    const payload = await r.json().catch(() => ({})) as { error?: string };
+    throw new Error(payload.error || `image generation failed (${r.status})`);
+  }
+  return r.json();
+}
+
+export async function deleteImageGeneration(id: string): Promise<void> {
+  const r = await fetch(`${BASE}/images/generations/${id}`, { method: "DELETE" });
+  if (!r.ok) throw new Error("deleteImageGeneration failed");
 }
 
 export interface ProviderModels {

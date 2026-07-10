@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MessageSquarePlus, MoreHorizontal, Pencil, Settings, Trash2, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Images, MessageSquarePlus, MoreHorizontal, Pencil, Settings, Trash2, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 
 const COLLAPSE_KEY = "yudu-sidebar-collapsed";
 
-export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
+export function Sidebar({ onOpenSettings, mode = "chat" }: { onOpenSettings: () => void; mode?: "chat" | "images" }) {
   const { t, locale } = useI18n();
   const conversations = useChat((s) => s.conversations);
   const activeId = useChat((s) => s.activeId);
@@ -94,6 +94,7 @@ export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
                 size="icon"
                 className="w-full"
                 onClick={async () => {
+                  window.location.hash = "/chat";
                   const c = await create();
                   await select(c.id);
                 }}
@@ -109,6 +110,7 @@ export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
             variant="default"
             className="w-full justify-start gap-2"
             onClick={async () => {
+              window.location.hash = "/chat";
               const c = await create();
               await select(c.id);
             }}
@@ -117,6 +119,19 @@ export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
             {t("sidebar.newChat")}
           </Button>
         )}
+      </div>
+
+      <div className="px-2 pb-2">
+        <Button
+          variant={mode === "images" ? "secondary" : "ghost"}
+          size={collapsed ? "icon" : "default"}
+          className={cn("w-full", !collapsed && "justify-start gap-2")}
+          onClick={() => { window.location.hash = "/images"; }}
+          aria-label={t("sidebar.imageStudio")}
+        >
+          <Images className="h-4 w-4" />
+          {!collapsed && t("sidebar.imageStudio")}
+        </Button>
       </div>
 
       {/* History */}

@@ -9,6 +9,7 @@ import { settingsRoutes } from "./routes/settings.js";
 import { agentRoutes } from "./routes/agents.js";
 import { usageRoutes } from "./routes/usage.js";
 import { uploadRoutes } from "./routes/uploads.js";
+import { imageRoutes } from "./routes/images.js";
 import { loadAgents } from "./agents/index.js";
 import { registerBuiltinTools } from "./tools/builtin.js";
 
@@ -37,6 +38,7 @@ export async function start(): Promise<void> {
   await app.register(agentRoutes);
   await app.register(usageRoutes);
   await app.register(uploadRoutes);
+  await app.register(imageRoutes);
 
   const port = Number(process.env.PORT ?? 8787);
   const host = process.env.HOST ?? "0.0.0.0";

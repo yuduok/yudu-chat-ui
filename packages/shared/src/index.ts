@@ -112,6 +112,54 @@ export interface ProviderConfig {
   // provider also advertises tools so the UI can be developed without a
   // real key.
   supportsTools?: boolean;
+  imageGeneration?: ImageGenerationCapabilities;
+}
+
+export interface ImageGenerationCapabilities {
+  models: string[];
+  sizes: string[];
+  qualities: string[];
+  styles: string[];
+  outputFormats: string[];
+  backgrounds: string[];
+  maxImages: number;
+  maxReferenceImages: number;
+  supportsReferenceImages: boolean;
+}
+
+export interface ImageGenerationRequest {
+  provider: string;
+  model: string;
+  prompt: string;
+  size: string;
+  quality: string;
+  style?: string;
+  count: number;
+  outputFormat: string;
+  background?: string;
+  referenceImages?: Array<{ name: string; dataUrl: string }>;
+}
+
+export interface GeneratedImageAsset {
+  id: string;
+  url: string;
+  mimeType: string;
+  filename: string;
+  revisedPrompt?: string;
+}
+
+export interface ImageGeneration {
+  id: string;
+  provider: string;
+  model: string;
+  prompt: string;
+  options: Omit<ImageGenerationRequest, "provider" | "model" | "prompt" | "referenceImages">;
+  referenceImages: Array<{ name: string; dataUrl: string }>;
+  status: "completed" | "failed";
+  images: GeneratedImageAsset[];
+  error?: string;
+  createdAt: number;
+  completedAt: number;
 }
 
 export interface AgentProfile {
