@@ -12,7 +12,7 @@ so you can try the UI before you bring your own API key.
 apps/
   server/          Fastify + better-sqlite3 + JSON agent profiles
     src/agents/    Seed agent profiles (general, researcher, coder, reviewer)
-    src/tools/     Built-in tool registry (get_weather, http_fetch, ...)
+    src/tools/     Built-in tool registry (workspace, command, web, ...)
   web/             Vite + React 18 + shadcn/ui + Zustand + react-markdown
 packages/
   shared/          Cross-package TypeScript types and SSE event union
@@ -33,6 +33,32 @@ The first time you run the app, conversations and settings are stored under
 to use, and start chatting. Toggle "Run with tools" in the composer to let the
 model call registered tools, or pick an agent profile from the header to apply
 a different system prompt, temperature, model, or tool allowlist.
+
+### Agent tools
+
+The built-in registry now follows the same layered pattern used by mature agent
+runtimes such as OpenClaw and Hermes:
+
+- `list_directory`, `read_file`, `search_files` — read-only workspace tools,
+  confined to `YUDU_WORKSPACE_ROOT`, with symlink escape checks and output caps.
+- `write_file` — full-file writes inside the workspace; disabled until
+  `YUDU_ENABLE_WRITE_TOOL=true`.
+- `execute_command` — non-interactive process execution without a shell;
+  disabled until `YUDU_ENABLE_COMMAND_TOOL=true` and requires
+  `YUDU_COMMAND_ALLOW` with a comma-separated executable allowlist. Use `*`
+  only inside an already isolated environment. Child processes do not inherit
+  environment variables whose names look like credentials, tokens, passwords,
+  secrets, cookies, authentication values, or API keys.
+- `web_search` — Tavily-backed public web search, available only when
+  `YUDU_TAVILY_API_KEY` is configured.
+- `http_fetch`, `get_weather` — the existing allowlisted fetch and weather
+  tools.
+
+The global **Run with tools** toggle advertises only tools marked safe by
+default. High-risk tools must be named in the selected agent profile *and*
+enabled by the server operator. Default read tools also block common credential
+paths (`.env`, `.ssh`, private keys, cloud credential files) and skip them while
+searching.
 
 ## Providers
 
