@@ -44,6 +44,7 @@ export function ImageGenerationPage() {
   const [background, setBackground] = useState("auto");
   const [moderation, setModeration] = useState("auto");
   const [outputCompression, setOutputCompression] = useState(100);
+  const [preferencesReady, setPreferencesReady] = useState(false);
   const [references, setReferences] = useState<ReferenceImage[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const { items, generating, error, load, generate, remove, cancel } = useImageGeneration();
@@ -76,6 +77,7 @@ export function ImageGenerationPage() {
       setModeration(selected.capabilities.moderations.includes(saved.moderation || "") ? saved.moderation! : selected.capabilities.moderations[0]);
       setOutputCompression(saved.outputCompression ?? 100);
       setCount(Math.min(saved.count || 1, selected.capabilities.maxImages));
+      setPreferencesReady(true);
     });
     void load();
   }, [load]);
@@ -92,6 +94,22 @@ export function ImageGenerationPage() {
     setCount((value) => Math.min(value, capability.maxImages));
     if (!capability.supportsReferenceImages) setReferences([]);
   }, [provider, capability]);
+
+  useEffect(() => {
+    if (!preferencesReady || !capability) return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      provider,
+      model,
+      size,
+      quality,
+      style,
+      count,
+      outputFormat,
+      background,
+      moderation,
+      outputCompression,
+    }));
+  }, [preferencesReady, capability, provider, model, size, quality, style, count, outputFormat, background, moderation, outputCompression]);
 
   const canGenerate = Boolean(capability && prompt.trim() && !generating);
   function changeProvider(nextProvider: string) {
@@ -117,7 +135,6 @@ export function ImageGenerationPage() {
 
   async function submit() {
     if (!request || !canGenerate) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...request, referenceImages: undefined, prompt: undefined }));
     await generate(request);
   }
 

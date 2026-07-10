@@ -71,6 +71,11 @@ export const en = {
   "settings.skills.delete": "Delete skill",
   "settings.skills.deleteConfirm": "Delete skill “{name}”?",
   "settings.provider": "Provider",
+  "settings.providers.add": "Add custom provider",
+  "settings.providers.name": "Provider name",
+  "settings.providers.newName": "New custom provider",
+  "settings.providers.saveAsNew": "Save as new provider",
+  "settings.providers.delete": "Delete custom provider",
   "settings.apiKey": "API Key",
   "settings.apiKey.placeholder": "sk-...",
   "settings.apiKey.hint":

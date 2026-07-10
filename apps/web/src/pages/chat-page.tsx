@@ -51,8 +51,12 @@ export function ChatPage() {
     };
   }, []);
 
+  async function refreshProviders() {
+    setProviders(await api.listProviders());
+  }
+
   useEffect(() => {
-    void api.listProviders().then(setProviders);
+    void refreshProviders();
   }, []);
 
   // Whenever the active provider changes, refresh the model list (defaults + manual).
@@ -218,7 +222,7 @@ export function ChatPage() {
         )}
       </main>
 
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} onSaved={refreshProviders} />
       <ActivityDrawer open={activityOpen} onOpenChange={setActivityOpen} />
     </div>
   );

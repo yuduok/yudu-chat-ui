@@ -7,6 +7,7 @@ if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 const settingsPath = path.join(dataDir, "settings.json");
 
 export interface ProviderSetting {
+  name?: string;
   apiKey?: string;
   baseUrl?: string;
   manualModels?: string[];
@@ -62,10 +63,11 @@ export async function settingsRoutes(app: FastifyInstance) {
   // GET: returns masked keys, never the raw secret
   app.get("/api/settings", async () => {
     const s = readSettings();
-    const masked: Record<string, { apiKeyMasked?: string; baseUrl?: string; manualModels: string[] }> = {};
+    const masked: Record<string, { name?: string; apiKeyMasked?: string; baseUrl?: string; manualModels: string[] }> = {};
     const maskedImages: Record<string, { name?: string; apiKeyMasked?: string; baseUrl?: string; model?: string }> = {};
     for (const [k, v] of Object.entries(s.providers)) {
       masked[k] = {
+        name: v.name,
         apiKeyMasked: maskKey(v.apiKey),
         baseUrl: v.baseUrl,
         manualModels: v.manualModels ?? [],
@@ -80,7 +82,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   // PUT: partial merge; masked placeholders for apiKey keep the existing secret
   app.put<{
     Body: {
-      providers?: Record<string, { apiKey?: string; baseUrl?: string; manualModels?: string[] }>;
+      providers?: Record<string, { name?: string; apiKey?: string; baseUrl?: string; manualModels?: string[]; copyFrom?: string } | null>;
       imageProviders?: Record<string, { name?: string; apiKey?: string; baseUrl?: string; model?: string; copyFrom?: string } | null>;
       ui?: { theme?: "light" | "dark" | "system" };
       skills?: { enabled?: boolean };
@@ -91,8 +93,14 @@ export async function settingsRoutes(app: FastifyInstance) {
 
     const merged: Record<string, ProviderSetting> = { ...current.providers };
     for (const [k, v] of Object.entries(incoming.providers ?? {})) {
+      if (v === null) {
+        delete merged[k];
+        continue;
+      }
+      const copied = typeof v.copyFrom === "string" ? current.providers[v.copyFrom] : undefined;
       const prev = merged[k] ?? {};
-      const next: ProviderSetting = { ...prev };
+      const next: ProviderSetting = { ...(copied ?? prev) };
+      if (typeof v.name === "string") next.name = v.name.trim();
       if (typeof v.baseUrl === "string") next.baseUrl = v.baseUrl;
       if (typeof v.apiKey === "string") {
         // Placeholder pattern => keep the existing key

@@ -38,13 +38,25 @@ const providers: Record<string, ChatProvider> = {
   mock,
 };
 
+export function isCustomProvider(id: string): boolean {
+  return id === "custom" || id.startsWith("custom:");
+}
+
+function createCustomProvider(id: string): ChatProvider {
+  return new OpenAICompatibleProvider({
+    id,
+    label: "Custom OpenAI-compatible",
+    defaultModels: ["custom-model"],
+  });
+}
+
 // Surface supportsTools uniformly so the API can advertise it.
 for (const p of Object.values(providers)) {
   if (p.supportsTools === undefined) p.supportsTools = false;
 }
 
 export function getProvider(id: string): ChatProvider | undefined {
-  return providers[id];
+  return providers[id] ?? (isCustomProvider(id) ? createCustomProvider(id) : undefined);
 }
 export function listProviders(): ChatProvider[] {
   return Object.values(providers);
