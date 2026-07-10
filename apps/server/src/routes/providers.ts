@@ -6,14 +6,29 @@ import { getImageProvider } from "../providers/images.js";
 
 export async function providerRoutes(app: FastifyInstance) {
   app.get("/api/providers", async () => {
-    return listProviders().map((p) => ({
+    const settings = getAllSettings();
+    const builtIns = listProviders().map((p) => ({
       id: p.id,
-      label: p.label,
+      label: p.id === "custom" ? settings.providers.custom?.name || p.label : p.label,
       models: p.defaultModels,
       baseUrl: p.defaultBaseUrl,
       supportsTools: p.supportsTools === true,
       imageGeneration: getImageProvider(p.id)?.capabilities,
     }));
+    const custom = Object.entries(settings.providers)
+      .filter(([id]) => id.startsWith("custom:"))
+      .map(([id, setting]) => {
+        const provider = getProvider(id)!;
+        return {
+          id,
+          label: setting.name || provider.label,
+          models: provider.defaultModels,
+          baseUrl: provider.defaultBaseUrl,
+          supportsTools: provider.supportsTools === true,
+          imageGeneration: undefined,
+        };
+      });
+    return [...builtIns, ...custom];
   });
 
   // Returns the merged model list for a provider: defaults + manual + (optionally) remote.

@@ -29,7 +29,8 @@ type SettingsTab = "providers" | "images" | "skills" | "appearance";
 export function SettingsDialog({ open, onOpenChange, onSaved, defaultTab = "providers" }: { open: boolean; onOpenChange: (v: boolean) => void; onSaved?: () => void | Promise<void>; defaultTab?: SettingsTab }) {
   const { t, locale, setLocale } = useI18n();
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
-  const [draft, setDraft] = useState<Record<string, { apiKey: string; baseUrl: string; show: boolean; manualModels: string[] }>>({});
+  const [draft, setDraft] = useState<Record<string, { name: string; apiKey: string; baseUrl: string; show: boolean; manualModels: string[]; copyFrom?: string }>>({});
+  const [deletedProviders, setDeletedProviders] = useState<string[]>([]);
   const [active, setActive] = useState<string>("");
   const [imageDraft, setImageDraft] = useState<Record<string, { name: string; apiKey: string; baseUrl: string; model: string; show: boolean; copyFrom?: string }>>({});
   const [deletedImageProviders, setDeletedImageProviders] = useState<string[]>([]);
@@ -53,6 +54,7 @@ export function SettingsDialog({ open, onOpenChange, onSaved, defaultTab = "prov
       for (const p of ps) {
         const cur = st.providers[p.id];
         init[p.id] = {
+          name: cur?.name ?? p.label,
           apiKey: cur?.apiKeyMasked ?? "",
           baseUrl: cur?.baseUrl ?? p.baseUrl ?? "",
           show: false,
@@ -60,6 +62,7 @@ export function SettingsDialog({ open, onOpenChange, onSaved, defaultTab = "prov
         };
       }
       setDraft(init);
+      setDeletedProviders([]);
       const imageProviderIds = Array.from(new Set(["openai", "custom", ...Object.keys(st.imageProviders).filter((id) => id.startsWith("custom:"))]));
       setImageDraft(Object.fromEntries(imageProviderIds.map((id) => [id, {
         name: st.imageProviders[id]?.name ?? (id === "openai" ? "OpenAI" : "Custom"),
@@ -83,6 +86,32 @@ export function SettingsDialog({ open, onOpenChange, onSaved, defaultTab = "prov
 
   function setField<K extends "apiKey" | "baseUrl">(id: string, key: K, value: string) {
     setDraft((d) => ({ ...d, [id]: { ...d[id], [key]: value } }));
+  }
+
+  function addChatProvider(sourceId?: string) {
+    const id = `custom:${crypto.randomUUID()}`;
+    const source = sourceId ? draft[sourceId] : undefined;
+    const name = t("settings.providers.newName");
+    setProviders((items) => [...items, { id, label: name, models: ["custom-model"], supportsTools: true }]);
+    setDraft((items) => ({
+      ...items,
+      [id]: source
+        ? { ...source, name, show: false, copyFrom: sourceId }
+        : { name, apiKey: "", baseUrl: "", show: false, manualModels: [], copyFrom: undefined },
+    }));
+    setActive(id);
+  }
+
+  function setProviderName(id: string, name: string) {
+    setDraft((items) => ({ ...items, [id]: { ...items[id], name } }));
+    setProviders((items) => items.map((provider) => provider.id === id ? { ...provider, label: name || t("settings.providers.newName") } : provider));
+  }
+
+  function removeChatProvider(id: string) {
+    setDraft((items) => { const next = { ...items }; delete next[id]; return next; });
+    setProviders((items) => items.filter((provider) => provider.id !== id));
+    setDeletedProviders((items) => items.includes(id) ? items : [...items, id]);
+    setActive("custom");
   }
 
   function addManual(id: string) {
@@ -145,10 +174,13 @@ export function SettingsDialog({ open, onOpenChange, onSaved, defaultTab = "prov
   async function save() {
     const payload = {
       providers: Object.fromEntries(
-        Object.entries(draft).map(([k, v]) => [
-          k,
-          { apiKey: v.apiKey, baseUrl: v.baseUrl, manualModels: v.manualModels },
-        ]),
+        [
+          ...Object.entries(draft).map(([k, v]) => [
+            k,
+            { name: v.name, apiKey: v.apiKey, baseUrl: v.baseUrl, manualModels: v.manualModels, copyFrom: v.copyFrom },
+          ] as const),
+          ...deletedProviders.map((id) => [id, null] as const),
+        ],
       ),
       imageProviders: {
         ...Object.fromEntries(Object.entries(imageDraft).map(([id, value]) => [id, { name: value.name, apiKey: value.apiKey, baseUrl: value.baseUrl, model: value.model, copyFrom: value.copyFrom }])),
@@ -198,10 +230,24 @@ export function SettingsDialog({ open, onOpenChange, onSaved, defaultTab = "prov
                   ))}
                 </SelectContent>
               </Select>
+              <Button type="button" variant="outline" size="sm" onClick={() => addChatProvider()}>
+                <Plus className="mr-1 h-3.5 w-3.5" />{t("settings.providers.add")}
+              </Button>
             </div>
 
             {activeProvider && activeDraft && (
               <div className="space-y-3 rounded-md border p-4">
+                {(active === "custom" || active.startsWith("custom:")) && <div className="flex items-end gap-2">
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <Label>{t("settings.providers.name")}</Label>
+                    <Input value={activeDraft.name} onChange={(event) => setProviderName(active, event.target.value)} />
+                  </div>
+                  {active === "custom" ? <Button type="button" variant="outline" size="sm" onClick={() => addChatProvider(active)}>
+                    <Plus className="mr-1 h-3.5 w-3.5" />{t("settings.providers.saveAsNew")}
+                  </Button> : <Button type="button" variant="ghost" size="icon" aria-label={t("settings.providers.delete")} onClick={() => removeChatProvider(active)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>}
+                </div>}
                 <div className="space-y-1.5">
                   <Label>{t("settings.apiKey")}</Label>
                   <div className="flex gap-2">

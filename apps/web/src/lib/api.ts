@@ -221,7 +221,7 @@ export async function getProviderModels(
 }
 
 export interface Settings {
-  providers: Record<string, { apiKeyMasked?: string; baseUrl?: string; manualModels: string[] }>;
+  providers: Record<string, { name?: string; apiKeyMasked?: string; baseUrl?: string; manualModels: string[] }>;
   imageProviders: Record<string, { name?: string; apiKeyMasked?: string; baseUrl?: string; model?: string }>;
   ui: { theme: "light" | "dark" | "system" };
   skills: { enabled: boolean };
@@ -234,7 +234,7 @@ export async function getSettings(): Promise<Settings> {
 }
 
 export async function saveSettings(input: {
-  providers: Record<string, { apiKey?: string | null; baseUrl?: string | null; manualModels?: string[] }>;
+  providers: Record<string, { name?: string | null; apiKey?: string | null; baseUrl?: string | null; manualModels?: string[]; copyFrom?: string } | null>;
   imageProviders?: Record<string, { name?: string | null; apiKey?: string | null; baseUrl?: string | null; model?: string | null; copyFrom?: string } | null>;
   ui?: { theme?: "light" | "dark" | "system" };
   skills?: { enabled?: boolean };
