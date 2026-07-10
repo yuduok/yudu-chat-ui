@@ -6,8 +6,8 @@ import { nanoid } from "nanoid";
 import type { GeneratedImageAsset, ImageGeneration, ImageGenerationRequest } from "@yudu/shared";
 import { dataDir, db } from "../db/index.js";
 import { imageGenerations } from "../db/schema.js";
-import { getImageProvider, listImageProviders } from "../providers/images.js";
-import { getImageProviderSetting } from "./settings.js";
+import { getImageProvider, isCustomImageProvider, listImageProviders } from "../providers/images.js";
+import { getAllSettings, getImageProviderSetting } from "./settings.js";
 
 const imagesDir = path.join(dataDir, "generated-images");
 const MIME_EXTENSIONS: Record<string, string> = {
@@ -38,7 +38,7 @@ function validateRequest(input: ImageGenerationRequest): string | null {
   if (!provider) return "provider does not support image generation";
   const c = provider.capabilities;
   if (!input.prompt?.trim()) return "prompt is required";
-  if (!input.model?.trim() || (input.provider !== "custom" && !c.models.includes(input.model))) return "unsupported image model";
+  if (!input.model?.trim() || (!isCustomImageProvider(input.provider) && !c.models.includes(input.model))) return "unsupported image model";
   if (!c.sizes.includes(input.size)) return "unsupported image size";
   if (!c.qualities.includes(input.quality)) return "unsupported image quality";
   if (input.style && !c.styles.includes(input.style)) return "unsupported image style";
@@ -60,10 +60,18 @@ function validateRequest(input: ImageGenerationRequest): string | null {
 export async function imageRoutes(app: FastifyInstance) {
   await fs.mkdir(imagesDir, { recursive: true });
 
-  app.get("/api/images/capabilities", async () => listImageProviders().map((provider) => ({
-    provider: provider.id,
-    capabilities: provider.capabilities,
-  })));
+  app.get("/api/images/capabilities", async () => {
+    const settings = getAllSettings();
+    const builtIns = listImageProviders().map((provider) => ({
+      provider: provider.id,
+      label: provider.id === "custom" ? settings.imageProviders.custom?.name || "Custom" : provider.id,
+      capabilities: provider.capabilities,
+    }));
+    const custom = Object.entries(settings.imageProviders)
+      .filter(([id]) => id.startsWith("custom:"))
+      .map(([id, setting]) => ({ provider: id, label: setting.name || "Custom", capabilities: getImageProvider(id)!.capabilities }));
+    return [...builtIns, ...custom];
+  });
 
   app.get("/api/images/generations", async () => {
     const rows = await db.select().from(imageGenerations).orderBy(desc(imageGenerations.createdAt)).limit(100);
@@ -76,7 +84,7 @@ export async function imageRoutes(app: FastifyInstance) {
     if (validationError) return reply.badRequest(validationError);
     const provider = getImageProvider(input.provider)!;
     const setting = getImageProviderSetting(input.provider);
-    if (input.provider === "custom" && (!setting.apiKey || !setting.baseUrl)) {
+    if (isCustomImageProvider(input.provider) && (!setting.apiKey || !setting.baseUrl)) {
       return reply.badRequest("custom image provider requires its own API key and base URL");
     }
     const id = nanoid();

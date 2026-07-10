@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { deleteSkill, importSkill, listSkills, setSkillEnabled } from "../skills/index.js";
+import { parseSkillFile } from "../skills/import-file.js";
 
 export async function skillRoutes(app: FastifyInstance) {
   app.get("/api/skills", async () => listSkills());
@@ -12,6 +13,19 @@ export async function skillRoutes(app: FastifyInstance) {
         content: req.body?.content ?? "",
       });
     } catch (error: any) {
+      return reply.badRequest(error?.message ?? String(error));
+    }
+  });
+
+  app.post("/api/skills/import", async (req, reply) => {
+    try {
+      const file = await req.file({ limits: { files: 1, fileSize: 2 * 1024 * 1024 } });
+      if (!file) return reply.badRequest("skill file is required");
+      const input = await file.toBuffer();
+      if (file.file.truncated) return reply.payloadTooLarge("skill file exceeds the 2 MB limit");
+      return importSkill(parseSkillFile(file.filename, input));
+    } catch (error: any) {
+      if (error?.code === "FST_REQ_FILE_TOO_LARGE") return reply.payloadTooLarge("skill file exceeds the 2 MB limit");
       return reply.badRequest(error?.message ?? String(error));
     }
   });

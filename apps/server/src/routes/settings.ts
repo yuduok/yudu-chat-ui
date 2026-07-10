@@ -13,6 +13,7 @@ export interface ProviderSetting {
 }
 
 export interface ImageProviderSetting {
+  name?: string;
   apiKey?: string;
   baseUrl?: string;
   model?: string;
@@ -62,7 +63,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   app.get("/api/settings", async () => {
     const s = readSettings();
     const masked: Record<string, { apiKeyMasked?: string; baseUrl?: string; manualModels: string[] }> = {};
-    const maskedImages: Record<string, { apiKeyMasked?: string; baseUrl?: string; model?: string }> = {};
+    const maskedImages: Record<string, { name?: string; apiKeyMasked?: string; baseUrl?: string; model?: string }> = {};
     for (const [k, v] of Object.entries(s.providers)) {
       masked[k] = {
         apiKeyMasked: maskKey(v.apiKey),
@@ -71,7 +72,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       };
     }
     for (const [k, v] of Object.entries(s.imageProviders)) {
-      maskedImages[k] = { apiKeyMasked: maskKey(v.apiKey), baseUrl: v.baseUrl, model: v.model };
+      maskedImages[k] = { name: v.name, apiKeyMasked: maskKey(v.apiKey), baseUrl: v.baseUrl, model: v.model };
     }
     return { providers: masked, imageProviders: maskedImages, ui: s.ui, skills: s.skills };
   });
@@ -80,7 +81,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   app.put<{
     Body: {
       providers?: Record<string, { apiKey?: string; baseUrl?: string; manualModels?: string[] }>;
-      imageProviders?: Record<string, { apiKey?: string; baseUrl?: string; model?: string }>;
+      imageProviders?: Record<string, { name?: string; apiKey?: string; baseUrl?: string; model?: string; copyFrom?: string } | null>;
       ui?: { theme?: "light" | "dark" | "system" };
       skills?: { enabled?: boolean };
     };
@@ -110,7 +111,13 @@ export async function settingsRoutes(app: FastifyInstance) {
     }
     const mergedImages: Record<string, ImageProviderSetting> = { ...current.imageProviders };
     for (const [k, v] of Object.entries(incoming.imageProviders ?? {})) {
-      const next: ImageProviderSetting = { ...(mergedImages[k] ?? {}) };
+      if (v === null) {
+        delete mergedImages[k];
+        continue;
+      }
+      const copied = typeof v.copyFrom === "string" ? current.imageProviders[v.copyFrom] : undefined;
+      const next: ImageProviderSetting = { ...(copied ?? mergedImages[k] ?? {}) };
+      if (typeof v.name === "string") next.name = v.name.trim();
       if (typeof v.baseUrl === "string") next.baseUrl = v.baseUrl.trim();
       if (typeof v.model === "string") next.model = v.model.trim();
       if (typeof v.apiKey === "string" && !v.apiKey.includes("...") && v.apiKey !== "****") next.apiKey = v.apiKey;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MockImageProvider, OpenAIImageProvider } from "../src/providers/images.js";
+import { getImageProvider, isCustomImageProvider, MockImageProvider, OpenAIImageProvider } from "../src/providers/images.js";
 
 const baseRequest = {
   provider: "openai",
@@ -13,6 +13,12 @@ const baseRequest = {
   outputFormat: "png",
   background: "auto",
 };
+
+test("dynamic custom image provider ids reuse the compatible adapter", () => {
+  assert.equal(isCustomImageProvider("custom:example"), true);
+  assert.equal(getImageProvider("custom:example")?.id, "custom:example");
+  assert.equal(getImageProvider("unknown"), undefined);
+});
 
 test("mock image provider returns deterministic image bytes", async () => {
   const output = await new MockImageProvider().generate({ ...baseRequest, provider: "mock", model: "mock-image-1" });
