@@ -46,7 +46,9 @@ runtimes such as OpenClaw and Hermes:
 - `execute_command` — non-interactive process execution without a shell;
   disabled until `YUDU_ENABLE_COMMAND_TOOL=true` and requires
   `YUDU_COMMAND_ALLOW` with a comma-separated executable allowlist. Use `*`
-  only inside an already isolated environment.
+  only inside an already isolated environment. Child processes do not inherit
+  environment variables whose names look like credentials, tokens, passwords,
+  secrets, cookies, authentication values, or API keys.
 - `web_search` — Tavily-backed public web search, available only when
   `YUDU_TAVILY_API_KEY` is configured.
 - `http_fetch`, `get_weather` — the existing allowlisted fetch and weather

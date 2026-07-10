@@ -91,3 +91,22 @@ test("execute_command enforces its executable allowlist", async () => {
     else process.env.YUDU_COMMAND_ALLOW = previous;
   });
 });
+
+test("execute_command does not expose server secrets to child processes", async () => {
+  await withWorkspace(async () => {
+    const previousAllow = process.env.YUDU_COMMAND_ALLOW;
+    const previousSecret = process.env.TEST_API_KEY;
+    process.env.YUDU_COMMAND_ALLOW = "node";
+    process.env.TEST_API_KEY = "should-not-leak";
+    const result = await execute_command.handler({
+      command: "node",
+      args: ["-e", "process.stdout.write(process.env.TEST_API_KEY || 'redacted')"],
+    }, {});
+    assert.equal(result.isError, false);
+    assert.match(result.content, /^redacted/);
+    if (previousAllow === undefined) delete process.env.YUDU_COMMAND_ALLOW;
+    else process.env.YUDU_COMMAND_ALLOW = previousAllow;
+    if (previousSecret === undefined) delete process.env.TEST_API_KEY;
+    else process.env.TEST_API_KEY = previousSecret;
+  });
+});

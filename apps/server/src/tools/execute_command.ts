@@ -18,6 +18,14 @@ const def: ToolDefinition = {
   },
 };
 
+function commandEnvironment(): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([name]) =>
+      !/(api.?key|auth|cookie|credential|password|secret|token)/i.test(name),
+    ),
+  );
+}
+
 const handler: ToolHandler = async (args, ctx) => {
   const input = args as { command?: unknown; args?: unknown; cwd?: unknown; timeout_ms?: unknown };
   if (typeof input?.command !== "string" || !input.command.trim()) {
@@ -45,7 +53,7 @@ const handler: ToolHandler = async (args, ctx) => {
     const child = spawn(input.command as string, (input.args as string[] | undefined) ?? [], {
       cwd,
       shell: false,
-      env: process.env,
+      env: commandEnvironment(),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
