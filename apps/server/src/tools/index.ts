@@ -12,20 +12,39 @@ export type ToolHandler = (
 export interface RegisteredTool {
   definition: ToolDefinition;
   handler: ToolHandler;
+  defaultEnabled: boolean;
+  isAvailable?: () => boolean;
 }
 
 const registry = new Map<string, RegisteredTool>();
 
-export function registerTool(def: ToolDefinition, handler: ToolHandler): void {
-  registry.set(def.name, { definition: def, handler });
+export interface ToolRegistrationOptions {
+  defaultEnabled?: boolean;
+  isAvailable?: () => boolean;
+}
+
+export function registerTool(
+  def: ToolDefinition,
+  handler: ToolHandler,
+  options: ToolRegistrationOptions = {},
+): void {
+  registry.set(def.name, {
+    definition: def,
+    handler,
+    defaultEnabled: options.defaultEnabled ?? true,
+    isAvailable: options.isAvailable,
+  });
 }
 
 export function getTool(name: string): RegisteredTool | undefined {
   return registry.get(name);
 }
 
-export function listTools(): ToolDefinition[] {
-  return Array.from(registry.values()).map((t) => t.definition);
+export function listTools(opts: { defaultsOnly?: boolean } = {}): ToolDefinition[] {
+  return Array.from(registry.values())
+    .filter((tool) => !opts.defaultsOnly || tool.defaultEnabled)
+    .filter((tool) => tool.isAvailable?.() ?? true)
+    .map((tool) => tool.definition);
 }
 
 export function listRegisteredTools(): RegisteredTool[] {
@@ -40,6 +59,9 @@ export async function runTool(
   const t = registry.get(name);
   if (!t) {
     return { content: `unknown tool: ${name}`, isError: true };
+  }
+  if (t.isAvailable && !t.isAvailable()) {
+    return { content: `tool '${name}' is not enabled on this server`, isError: true };
   }
   try {
     const out = await t.handler(args, ctx);

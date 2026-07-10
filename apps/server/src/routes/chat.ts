@@ -121,8 +121,10 @@ function pickTools(opts: {
   const wantNames = new Set<string>();
   if (opts.agent?.tools) opts.agent.tools.forEach((n) => wantNames.add(n));
   if (opts.useTools) {
-    // Open the entire registry when useTools is on.
-    for (const t of listTools()) wantNames.add(t.name);
+    // Only expose tools explicitly marked safe for the global toggle.
+    // Write/command tools require both an agent allowlist entry and a
+    // server-side capability flag.
+    for (const t of listTools({ defaultsOnly: true })) wantNames.add(t.name);
   }
   if (opts.providerId === "mock") wantNames.add("get_weather");
   if (wantNames.size === 0) return [];
@@ -242,6 +244,7 @@ async function runAgentTurn(opts: {
   let promptTokens = 0;
   let completionTokens = 0;
   const collectedToolCalls: Array<{ id: string; name: string; arguments: Record<string, unknown> | string }> = [];
+  const allowedToolNames = new Set(tools.map((tool) => tool.name));
 
   // Loop: first iteration uses the prompt as-is, subsequent iterations
   // run any tool calls and re-feed the model with results.
@@ -360,7 +363,9 @@ async function runAgentTurn(opts: {
     // Run each tool call and feed the results back.
     for (const call of collectedToolCalls) {
       let result: { content: string; isError?: boolean };
-      try {
+      if (!allowedToolNames.has(call.name)) {
+        result = { content: `tool '${call.name}' is not authorized for this turn`, isError: true };
+      } else try {
         result = await runTool(call.name, parseArgs(call.arguments), { signal });
       } catch (err: any) {
         result = { content: err?.message ?? String(err), isError: true };

@@ -1,8 +1,8 @@
 {
   "id": "reviewer",
   "label": "Reviewer",
-  "description": "Code reviewer; be terse and concrete.",
-  "systemPrompt": "You are a code reviewer. Be terse and concrete: list specific issues with file/line refs where possible, then a one-line verdict. No tool calls.",
-  "tools": [],
+  "description": "Code reviewer with read-only workspace inspection.",
+  "systemPrompt": "You are a code reviewer. Inspect relevant workspace files, then list only actionable issues with file/line refs and a one-line verdict.",
+  "tools": ["list_directory", "read_file", "search_files"],
   "temperature": 0.2
 }
