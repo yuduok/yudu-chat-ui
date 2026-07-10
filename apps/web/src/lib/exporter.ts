@@ -12,6 +12,8 @@ function partToText(part: any): string {
       return `> _Thinking:_ ${part.text ?? ""}\n`;
     case "image_url":
       return `[image](${part.image_url?.url ?? ""})`;
+    case "document":
+      return `[document: ${part.name}]`;
     case "tool_call":
       return `> _Tool call:_ **${part.name}** (\`${JSON.stringify(part.arguments)}\`)`;
     case "tool_result":

@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Copy,
   Loader2,
+  FileText,
   Pencil,
   RefreshCw,
   Terminal,
@@ -96,7 +97,14 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
                 size="sm"
                 onClick={async () => {
                   setEditing(false);
-                  await send(draft, { editLastUser: true });
+                  const attachmentParts = (msg.parts ?? []).filter((part) => part.type !== "text");
+                  await send(draft, {
+                    editLastUser: true,
+                    parts: [
+                      ...(draft.trim() ? [{ type: "text", text: draft.trim() } as ContentPart] : []),
+                      ...attachmentParts,
+                    ],
+                  });
                 }}
               >
                 {t("message.edit")}
@@ -112,7 +120,10 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
             {msg.content ? <Markdown>{msg.content}</Markdown> : null}
           </div>
         ) : (
-          <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">{msg.content}</div>
+          <div className="space-y-2">
+            <AttachmentGrid parts={msg.parts} />
+            {msg.content ? <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">{msg.content}</div> : null}
+          </div>
         )}
 
         {/* Footer: tokens + actions */}
@@ -198,6 +209,30 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
           <User className="h-4 w-4" />
         </div>
       )}
+    </div>
+  );
+}
+
+function AttachmentGrid({ parts }: { parts?: Msg["parts"] | null }) {
+  const attachments = (parts ?? []).filter(
+    (part) => part.type === "image_url" || part.type === "document",
+  );
+  if (attachments.length === 0) return null;
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      {attachments.map((part, index) => part.type === "image_url" ? (
+        <img
+          key={index}
+          src={part.image_url.url}
+          alt={part.name ?? "attachment"}
+          className="max-h-64 w-full rounded-lg border object-cover"
+        />
+      ) : part.type === "document" ? (
+        <div key={index} className="flex items-center gap-2 rounded-lg border border-primary-foreground/20 bg-primary-foreground/10 p-2 text-xs">
+          <FileText className="h-4 w-4 shrink-0" />
+          <span className="truncate">{part.name}</span>
+        </div>
+      ) : null)}
     </div>
   );
 }

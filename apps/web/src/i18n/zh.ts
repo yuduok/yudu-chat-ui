@@ -17,6 +17,9 @@ export const zh: Record<TranslationKey, string> = {
   "composer.stop": "停止",
   "composer.disclaimer": "AI 可能会出错，请核实重要信息。",
   "composer.runWithTools": "使用工具",
+  "composer.attach": "添加、拖放或粘贴图片和文档",
+  "composer.removeAttachment": "移除附件",
+  "composer.uploadFailed": "附件上传失败",
 
   // Message
   "message.copy": "复制",

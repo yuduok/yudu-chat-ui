@@ -15,6 +15,9 @@ export const en = {
   "composer.stop": "Stop",
   "composer.disclaimer": "AI can make mistakes. Verify important info.",
   "composer.runWithTools": "Run with tools",
+  "composer.attach": "Attach, drop, or paste images and documents",
+  "composer.removeAttachment": "Remove attachment",
+  "composer.uploadFailed": "Attachment upload failed",
 
   // Message
   "message.copy": "Copy",

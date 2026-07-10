@@ -62,6 +62,11 @@ function messageToProvider(m: ChatMessage): ProviderMessage {
         providerParts.push({ type: "text", text: p.text });
       } else if (p.type === "image_url") {
         providerParts.push({ type: "image_url", image_url: p.image_url });
+      } else if (p.type === "document") {
+        providerParts.push({
+          type: "text",
+          text: `[Attached document: ${JSON.stringify(p.name)} (${p.mimeType})]\n${p.text}\n[End attached document]`,
+        });
       }
       // p.type === "reasoning" is intentionally dropped — chat-only.
     }

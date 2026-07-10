@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Brain, Send, Square, Wand2 } from "lucide-react";
+import { Brain, FileText, Image, Loader2, Paperclip, Send, Square, Wand2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
@@ -17,6 +17,8 @@ import { useI18n } from "@/i18n";
 import { AgentMenu } from "@/components/agent-menu";
 import { EffortMenu } from "@/components/effort-menu";
 import type { AgentProfile } from "@yudu/shared";
+import type { ContentPart } from "@yudu/shared";
+import { uploadAttachment } from "@/lib/api";
 
 interface ComposerProps {
   providers: { id: string; label: string; models: string[] }[];
@@ -42,12 +44,16 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
   const showThinking = active?.showThinking !== false;
 
   const [value, setValue] = useState("");
+  const [attachments, setAttachments] = useState<ContentPart[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   // useTools is a *global* composer preference (alongside provider /
   // model / showThinking): the user picks it once and every tab /
   // new conversation inherits it. Persisted to localStorage so it
   // survives a reload.
   const useTools = useUiDefaults((s) => s.useTools);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   // Auto-resize
   useEffect(() => {
@@ -59,9 +65,15 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
 
   function submit() {
     const text = value.trim();
-    if (!text || streaming) return;
+    if ((!text && attachments.length === 0) || streaming || uploading) return;
     setValue("");
+    const parts: ContentPart[] = [
+      ...(text ? [{ type: "text", text } as ContentPart] : []),
+      ...attachments,
+    ];
+    setAttachments([]);
     void send(text, {
+      parts,
       useTools,
       reasoningEffort: (active?.reasoningEffort as
         | "low"
@@ -72,6 +84,23 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
         | undefined) ?? undefined,
       showThinking: active?.showThinking ?? true,
     });
+  }
+
+  async function addFiles(files: FileList | null) {
+    if (!files?.length) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      for (const file of Array.from(files).slice(0, Math.max(0, 6 - attachments.length))) {
+        const attachment = await uploadAttachment(file);
+        setAttachments((current) => [...current, attachment].slice(0, 6));
+      }
+    } catch (error: any) {
+      setUploadError(error?.message || t("composer.uploadFailed"));
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
   }
 
   return (
@@ -125,12 +154,69 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
           </Select>
         </div>
 
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {attachments.map((attachment, index) => {
+              const image = attachment.type === "image_url";
+              const name = image
+                ? attachment.name
+                : attachment.type === "document"
+                  ? attachment.name
+                  : "attachment";
+              return (
+                <div key={`${name}-${index}`} className="flex max-w-[220px] items-center gap-2 rounded-lg border bg-muted/50 px-2 py-1.5 text-xs">
+                  {image ? <Image className="h-4 w-4 shrink-0" /> : <FileText className="h-4 w-4 shrink-0" />}
+                  <span className="truncate">{name}</span>
+                  <button type="button" onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))} aria-label={t("composer.removeAttachment")}>
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {uploadError && <p className="text-xs text-destructive">{uploadError}</p>}
+
         {/* Middle row: input + send button (send aligned with input baseline) */}
         <div className="flex items-center gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            className="hidden"
+            accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.docx,.txt,.md,.csv,.json,.html,.xml"
+            onChange={(event) => void addFiles(event.target.files)}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="h-10 w-10 shrink-0"
+            onClick={() => fileRef.current?.click()}
+            disabled={streaming || uploading || attachments.length >= 6}
+            title={t("composer.attach")}
+            aria-label={t("composer.attach")}
+          >
+            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+          </Button>
           <Textarea
             ref={ref}
             value={value}
             onChange={(e) => setValue(e.target.value)}
+            onPaste={(event) => {
+              const files = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+              if (files.length) {
+                event.preventDefault();
+                const transfer = new DataTransfer();
+                files.forEach((file) => transfer.items.add(file));
+                void addFiles(transfer.files);
+              }
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              void addFiles(event.dataTransfer.files);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -157,7 +243,7 @@ export function Composer({ providers, modelList, agents: _agents }: ComposerProp
               onClick={submit}
               size="icon"
               className="h-10 w-10 shrink-0"
-              disabled={!value.trim()}
+              disabled={!value.trim() && attachments.length === 0}
               title={t("composer.send")}
               aria-label={t("composer.send")}
             >
