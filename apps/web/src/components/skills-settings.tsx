@@ -17,12 +17,7 @@ export function SkillsSettings({ enabled, onEnabledChange, skills, onSkillsChang
     if (!file) return;
     setImporting(true);
     try {
-      const parsed = JSON.parse(await file.text()) as { name?: string; description?: string; content?: string; instructions?: string };
-      const skill = await api.importSkill({
-        name: parsed.name ?? file.name.replace(/\.json$/i, ""),
-        description: parsed.description,
-        content: parsed.content ?? parsed.instructions ?? "",
-      });
+      const skill = await api.importSkillFile(file);
       onSkillsChange([...skills, skill]);
       toast.success(t("settings.skills.imported"));
     } catch (error: any) {
@@ -49,7 +44,7 @@ export function SkillsSettings({ enabled, onEnabledChange, skills, onSkillsChang
       <div><Label>{t("settings.skills.enabled")}</Label><p className="text-[11px] text-muted-foreground">{t("settings.skills.enabledHint")}</p></div>
       <Switch checked={enabled} onCheckedChange={onEnabledChange} />
     </div>
-    <input ref={inputRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => void importFile(event.target.files?.[0])} />
+    <input ref={inputRef} type="file" accept="application/json,text/markdown,application/zip,application/x-zip-compressed,.json,.md,.markdown,.zip" className="hidden" onChange={(event) => void importFile(event.target.files?.[0])} />
     <Button type="button" variant="outline" disabled={importing} onClick={() => inputRef.current?.click()}><FileUp className="mr-2 h-4 w-4" />{t("settings.skills.import")}</Button>
     <p className="text-[11px] text-muted-foreground">{t("settings.skills.format")}</p>
     <p className="text-[11px] text-muted-foreground">{t("settings.skills.immediate")}</p>

@@ -100,8 +100,8 @@ new providers by registering a `ChatProvider` in
 - **Independent image provider settings** — OpenAI image generation can reuse
   the chat OpenAI endpoint/key or override them. The Custom image provider has
   its own required endpoint, API key, and default model.
-- **Importable skills** — Settings can enable Skills globally, import
-  declarative JSON instruction packs, toggle each Skill, and delete installed
+- **Importable skills** — Settings can enable Skills globally, import JSON,
+  Markdown, or ZIP packages containing one `SKILL.md`, toggle each Skill, and delete installed
   Skills. Enabled Skill content is appended to the server-side system prompt;
   imported Skills do not execute code or grant tool permissions.
 - **Multi-agent orchestration** — agent profiles live in

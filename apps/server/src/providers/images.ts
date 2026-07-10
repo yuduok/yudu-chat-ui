@@ -127,5 +127,8 @@ const imageProviders: Record<string, ImageProvider> = {
   mock: new MockImageProvider(),
 };
 
-export function getImageProvider(id: string): ImageProvider | undefined { return imageProviders[id]; }
+export function isCustomImageProvider(id: string): boolean { return id === "custom" || id.startsWith("custom:"); }
+export function getImageProvider(id: string): ImageProvider | undefined {
+  return imageProviders[id] ?? (isCustomImageProvider(id) ? new OpenAIImageProvider(id) : undefined);
+}
 export function listImageProviders(): ImageProvider[] { return Object.values(imageProviders); }

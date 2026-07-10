@@ -169,7 +169,7 @@ export async function uploadAttachment(file: File): Promise<ContentPart> {
   return payload.attachment;
 }
 
-export async function getImageCapabilities(): Promise<Array<{ provider: string; capabilities: ImageGenerationCapabilities }>> {
+export async function getImageCapabilities(): Promise<Array<{ provider: string; label?: string; capabilities: ImageGenerationCapabilities }>> {
   const r = await fetch(`${BASE}/images/capabilities`);
   if (!r.ok) throw new Error("getImageCapabilities failed");
   return r.json();
@@ -222,7 +222,7 @@ export async function getProviderModels(
 
 export interface Settings {
   providers: Record<string, { apiKeyMasked?: string; baseUrl?: string; manualModels: string[] }>;
-  imageProviders: Record<string, { apiKeyMasked?: string; baseUrl?: string; model?: string }>;
+  imageProviders: Record<string, { name?: string; apiKeyMasked?: string; baseUrl?: string; model?: string }>;
   ui: { theme: "light" | "dark" | "system" };
   skills: { enabled: boolean };
 }
@@ -235,7 +235,7 @@ export async function getSettings(): Promise<Settings> {
 
 export async function saveSettings(input: {
   providers: Record<string, { apiKey?: string | null; baseUrl?: string | null; manualModels?: string[] }>;
-  imageProviders?: Record<string, { apiKey?: string | null; baseUrl?: string | null; model?: string | null }>;
+  imageProviders?: Record<string, { name?: string | null; apiKey?: string | null; baseUrl?: string | null; model?: string | null; copyFrom?: string } | null>;
   ui?: { theme?: "light" | "dark" | "system" };
   skills?: { enabled?: boolean };
 }): Promise<Settings> {
@@ -257,6 +257,14 @@ export async function listSkills(): Promise<SkillDefinition[]> {
 export async function importSkill(input: { name: string; description?: string; content: string }): Promise<SkillDefinition> {
   const r = await fetch(`${BASE}/skills`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
   if (!r.ok) throw new Error((await r.text().catch(() => "")) || "importSkill failed");
+  return r.json();
+}
+
+export async function importSkillFile(file: File): Promise<SkillDefinition> {
+  const body = new FormData();
+  body.append("file", file);
+  const r = await fetch(`${BASE}/skills/import`, { method: "POST", body });
+  if (!r.ok) throw new Error((await r.text().catch(() => "")) || "importSkillFile failed");
   return r.json();
 }
 

@@ -24,12 +24,16 @@ interface FetchedModels {
   error?: string;
 }
 
-export function SettingsDialog({ open, onOpenChange, onSaved }: { open: boolean; onOpenChange: (v: boolean) => void; onSaved?: () => void | Promise<void> }) {
+type SettingsTab = "providers" | "images" | "skills" | "appearance";
+
+export function SettingsDialog({ open, onOpenChange, onSaved, defaultTab = "providers" }: { open: boolean; onOpenChange: (v: boolean) => void; onSaved?: () => void | Promise<void>; defaultTab?: SettingsTab }) {
   const { t, locale, setLocale } = useI18n();
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [draft, setDraft] = useState<Record<string, { apiKey: string; baseUrl: string; show: boolean; manualModels: string[] }>>({});
   const [active, setActive] = useState<string>("");
-  const [imageDraft, setImageDraft] = useState<Record<string, { apiKey: string; baseUrl: string; model: string; show: boolean }>>({});
+  const [imageDraft, setImageDraft] = useState<Record<string, { name: string; apiKey: string; baseUrl: string; model: string; show: boolean; copyFrom?: string }>>({});
+  const [deletedImageProviders, setDeletedImageProviders] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<SettingsTab>(defaultTab);
   const [skillsEnabled, setSkillsEnabled] = useState(false);
   const [skills, setSkills] = useState<SkillDefinition[]>([]);
   const [manualInput, setManualInput] = useState("");
@@ -41,6 +45,7 @@ export function SettingsDialog({ open, onOpenChange, onSaved }: { open: boolean;
 
   useEffect(() => {
     if (!open) return;
+    setActiveTab(defaultTab);
     (async () => {
       const [ps, st, installedSkills] = await Promise.all([api.listProviders(), api.getSettings(), api.listSkills()]);
       setProviders(ps);
@@ -55,19 +60,22 @@ export function SettingsDialog({ open, onOpenChange, onSaved }: { open: boolean;
         };
       }
       setDraft(init);
-      setImageDraft(Object.fromEntries(["openai", "custom"].map((id) => [id, {
+      const imageProviderIds = Array.from(new Set(["openai", "custom", ...Object.keys(st.imageProviders).filter((id) => id.startsWith("custom:"))]));
+      setImageDraft(Object.fromEntries(imageProviderIds.map((id) => [id, {
+        name: st.imageProviders[id]?.name ?? (id === "openai" ? "OpenAI" : "Custom"),
         apiKey: st.imageProviders[id]?.apiKeyMasked ?? "",
         baseUrl: st.imageProviders[id]?.baseUrl ?? "",
-        model: st.imageProviders[id]?.model ?? (id === "custom" ? "gpt-image-2" : ""),
+        model: st.imageProviders[id]?.model ?? (id === "openai" ? "" : "gpt-image-2"),
         show: false,
       }])));
+      setDeletedImageProviders([]);
       setSkillsEnabled(st.skills.enabled);
       setSkills(installedSkills);
       if (ps[0]) setActive(ps[0].id);
       setFetched({});
       setPicked({});
     })();
-  }, [open]);
+  }, [open, defaultTab]);
 
   useEffect(() => {
     setDark(document.documentElement.classList.contains("dark"));
@@ -142,7 +150,10 @@ export function SettingsDialog({ open, onOpenChange, onSaved }: { open: boolean;
           { apiKey: v.apiKey, baseUrl: v.baseUrl, manualModels: v.manualModels },
         ]),
       ),
-      imageProviders: Object.fromEntries(Object.entries(imageDraft).map(([id, value]) => [id, { apiKey: value.apiKey, baseUrl: value.baseUrl, model: value.model }])),
+      imageProviders: {
+        ...Object.fromEntries(Object.entries(imageDraft).map(([id, value]) => [id, { name: value.name, apiKey: value.apiKey, baseUrl: value.baseUrl, model: value.model, copyFrom: value.copyFrom }])),
+        ...Object.fromEntries(deletedImageProviders.map((id) => [id, null])),
+      },
       skills: { enabled: skillsEnabled },
     };
     await api.saveSettings(payload);
@@ -164,7 +175,7 @@ export function SettingsDialog({ open, onOpenChange, onSaved }: { open: boolean;
           <DialogTitle>{t("settings.title")}</DialogTitle>
           <DialogDescription>{t("settings.description")}</DialogDescription>
         </DialogHeader>
-        <Tabs defaultValue="providers">
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as SettingsTab)}>
           <TabsList>
             <TabsTrigger value="providers">{t("settings.tab.providers")}</TabsTrigger>
             <TabsTrigger value="images">{t("settings.tab.imageProviders")}</TabsTrigger>
@@ -347,11 +358,32 @@ export function SettingsDialog({ open, onOpenChange, onSaved }: { open: boolean;
           </TabsContent>
 
           <TabsContent value="images" className="space-y-3">
-            {(["openai", "custom"] as const).map((id) => {
+            <div className="flex justify-end">
+              <Button type="button" variant="outline" size="sm" onClick={() => {
+                const id = `custom:${crypto.randomUUID()}`;
+                setImageDraft((draft) => ({ ...draft, [id]: { name: t("settings.imageProviders.newName"), apiKey: "", baseUrl: "", model: "gpt-image-2", show: false } }));
+              }}>
+                <Plus className="mr-1 h-3.5 w-3.5" />{t("settings.imageProviders.add")}
+              </Button>
+            </div>
+            {Object.keys(imageDraft).map((id) => {
               const value = imageDraft[id];
               if (!value) return null;
               return <div key={id} className="space-y-3 rounded-md border p-4">
-                <div><Label>{id === "openai" ? "OpenAI" : "Custom"}</Label><p className="text-[11px] text-muted-foreground">{t(id === "openai" ? "settings.imageProviders.openaiHint" : "settings.imageProviders.customHint")}</p></div>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    {id === "openai" ? <Label>OpenAI</Label> : <div className="space-y-1.5"><Label>{t("settings.imageProviders.name")}</Label><Input value={value.name} onChange={(event) => setImageDraft((draft) => ({ ...draft, [id]: { ...draft[id], name: event.target.value } }))} /></div>}
+                    <p className="mt-1 text-[11px] text-muted-foreground">{t(id === "openai" ? "settings.imageProviders.openaiHint" : "settings.imageProviders.customHint")}</p>
+                  </div>
+                  {id === "custom" && <Button type="button" variant="outline" size="sm" onClick={() => {
+                    const nextId = `custom:${crypto.randomUUID()}`;
+                    setImageDraft((draft) => ({ ...draft, [nextId]: { ...value, name: t("settings.imageProviders.newName"), show: false, copyFrom: id } }));
+                  }}><Plus className="mr-1 h-3.5 w-3.5" />{t("settings.imageProviders.saveAsNew")}</Button>}
+                  {id !== "openai" && id !== "custom" && <Button type="button" variant="ghost" size="icon" aria-label={t("settings.imageProviders.delete")} onClick={() => {
+                    setImageDraft((draft) => { const next = { ...draft }; delete next[id]; return next; });
+                    setDeletedImageProviders((items) => items.includes(id) ? items : [...items, id]);
+                  }}><Trash2 className="h-4 w-4" /></Button>}
+                </div>
                 <div className="space-y-1.5"><Label>{t("settings.apiKey")}</Label><div className="relative"><Input type={value.show ? "text" : "password"} value={value.apiKey} onChange={(event) => setImageDraft((draft) => ({ ...draft, [id]: { ...draft[id], apiKey: event.target.value } }))} /><button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" onClick={() => setImageDraft((draft) => ({ ...draft, [id]: { ...draft[id], show: !draft[id].show } }))}>{value.show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></div>
                 <div className="space-y-1.5"><Label>{t("settings.baseUrl")}</Label><Input value={value.baseUrl} onChange={(event) => setImageDraft((draft) => ({ ...draft, [id]: { ...draft[id], baseUrl: event.target.value } }))} placeholder="https://api.example.com/v1" /></div>
                 <div className="space-y-1.5"><Label>{t("images.model")}</Label><Input value={value.model} onChange={(event) => setImageDraft((draft) => ({ ...draft, [id]: { ...draft[id], model: event.target.value } }))} placeholder="gpt-image-2" /></div>
