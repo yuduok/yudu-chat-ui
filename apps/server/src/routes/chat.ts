@@ -65,7 +65,7 @@ function messageToProvider(m: ChatMessage): ProviderMessage {
       } else if (p.type === "document") {
         providerParts.push({
           type: "text",
-          text: `<document name="${p.name}" type="${p.mimeType}">\n${p.text}\n</document>`,
+          text: `[Attached document: ${JSON.stringify(p.name)} (${p.mimeType})]\n${p.text}\n[End attached document]`,
         });
       }
       // p.type === "reasoning" is intentionally dropped — chat-only.

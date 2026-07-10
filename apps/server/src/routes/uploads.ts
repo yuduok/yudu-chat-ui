@@ -16,6 +16,19 @@ const TEXT_TYPES = new Set([
 const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const MAX_EXTRACTED_CHARS = 120_000;
 
+function inferredTextType(filename: string): string | null {
+  const extension = filename.toLowerCase().split(".").pop();
+  return ({
+    csv: "text/csv",
+    html: "text/html",
+    json: "application/json",
+    md: "text/markdown",
+    markdown: "text/markdown",
+    txt: "text/plain",
+    xml: "text/xml",
+  } as Record<string, string>)[extension ?? ""] ?? null;
+}
+
 function hasImageSignature(mimetype: string, buffer: Buffer): boolean {
   if (mimetype === "image/png") return buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
   if (mimetype === "image/jpeg") return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
@@ -55,14 +68,20 @@ export async function attachmentFromBuffer(input: {
     text = (await pdf(buffer)).text;
   } else if (mimetype === DOCX_TYPE || filename.toLowerCase().endsWith(".docx")) {
     text = (await mammoth.extractRawText({ buffer })).value;
-  } else if (TEXT_TYPES.has(mimetype) || mimetype.startsWith("text/")) {
+  } else if (TEXT_TYPES.has(mimetype) || mimetype.startsWith("text/") || inferredTextType(filename)) {
     text = buffer.toString("utf8");
   } else {
     throw new Error(`unsupported attachment type: ${mimetype || filename}`);
   }
   const normalized = normalizeText(text);
   if (!normalized) throw new Error("document contains no extractable text");
-  return { type: "document", name: filename, mimeType: mimetype, size: buffer.byteLength, text: normalized };
+  return {
+    type: "document",
+    name: filename,
+    mimeType: mimetype || inferredTextType(filename) || "text/plain",
+    size: buffer.byteLength,
+    text: normalized,
+  };
 }
 
 export async function uploadRoutes(app: FastifyInstance) {

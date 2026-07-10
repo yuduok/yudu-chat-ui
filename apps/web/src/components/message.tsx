@@ -97,7 +97,14 @@ export function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
                 size="sm"
                 onClick={async () => {
                   setEditing(false);
-                  await send(draft, { editLastUser: true, parts: msg.parts });
+                  const attachmentParts = (msg.parts ?? []).filter((part) => part.type !== "text");
+                  await send(draft, {
+                    editLastUser: true,
+                    parts: [
+                      ...(draft.trim() ? [{ type: "text", text: draft.trim() } as ContentPart] : []),
+                      ...attachmentParts,
+                    ],
+                  });
                 }}
               >
                 {t("message.edit")}

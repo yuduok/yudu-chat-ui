@@ -50,3 +50,13 @@ test("unsupported binary documents are rejected", async () => {
     /unsupported attachment type/,
   );
 });
+
+test("text document type can be inferred when browsers omit MIME", async () => {
+  const attachment = await attachmentFromBuffer({
+    filename: "readme.md",
+    mimetype: "",
+    buffer: Buffer.from("hello", "utf8"),
+  });
+  assert.equal(attachment.type, "document");
+  if (attachment.type === "document") assert.equal(attachment.mimeType, "text/markdown");
+});
