@@ -1,8 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import fs from "node:fs";
 import path from "node:path";
+import { dataDir } from "../db/index.js";
 
-const dataDir = path.resolve(process.cwd(), "data");
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 const settingsPath = path.join(dataDir, "settings.json");
 

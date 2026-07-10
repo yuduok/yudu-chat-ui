@@ -37,3 +37,17 @@ export const messages = sqliteTable("messages", {
   completionTokens: integer("completion_tokens"),
   createdAt: integer("created_at").notNull(),
 });
+
+export const imageGenerations = sqliteTable("image_generations", {
+  id: text("id").primaryKey(),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  prompt: text("prompt").notNull(),
+  options: text("options").notNull(),
+  referenceImages: text("reference_images").notNull(),
+  status: text("status").notNull(),
+  images: text("images").notNull(),
+  error: text("error"),
+  createdAt: integer("created_at").notNull(),
+  completedAt: integer("completed_at").notNull(),
+});

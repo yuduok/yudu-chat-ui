@@ -91,6 +91,12 @@ new providers by registering a `ChatProvider` in
   vision parts; PDF, DOCX, Markdown, text, CSV, JSON, HTML, and XML files are
   extracted server-side and forwarded as named document context. Attachments
   remain in message history and conversation exports.
+- **Image studio** — a dedicated `#/images` workspace supports OpenAI and
+  custom OpenAI-compatible image endpoints plus an offline mock provider.
+  Choose model, size, quality, style, count, format, background, moderation,
+  and output compression; add
+  reference images; cancel work; download results; reuse settings; and manage
+  locally persisted generation history.
 - **Multi-agent orchestration** — agent profiles live in
   `apps/server/src/agents/*.json` and are loaded on boot. Each profile
   overrides `systemPrompt`, `temperature`, `model`, `provider`, and a `tools`

@@ -8,7 +8,7 @@ import * as schema from "./schema.js";
 // Desktop (Tauri sidecar) 模式下,把数据写到系统标准目录(由 sidecar 注入
 // YUDU_DATA_DIR);Web 模式下保留原行为:写到 cwd/data,方便本地开发。
 const isDesktop = process.env.YUDU_DESKTOP === "1";
-const dataDir = isDesktop
+export const dataDir = isDesktop
   ? (process.env.YUDU_DATA_DIR ?? path.join(os.homedir(), ".yudu-chat"))
   : path.resolve(process.cwd(), "data");
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
@@ -57,6 +57,20 @@ sqlite.exec(`
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
   );
   CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
+  CREATE TABLE IF NOT EXISTS image_generations (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    options TEXT NOT NULL,
+    reference_images TEXT NOT NULL,
+    status TEXT NOT NULL,
+    images TEXT NOT NULL,
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    completed_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_image_generations_created ON image_generations(created_at DESC);
 `);
 
 // v3 columns

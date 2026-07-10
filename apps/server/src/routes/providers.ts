@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { listProviders, getProvider } from "../providers/registry.js";
 import { fetchOpenAIModels } from "../providers/remote.js";
 import { getAllSettings, getProviderSetting } from "./settings.js";
+import { getImageProvider } from "../providers/images.js";
 
 export async function providerRoutes(app: FastifyInstance) {
   app.get("/api/providers", async () => {
@@ -11,6 +12,7 @@ export async function providerRoutes(app: FastifyInstance) {
       models: p.defaultModels,
       baseUrl: p.defaultBaseUrl,
       supportsTools: p.supportsTools === true,
+      imageGeneration: getImageProvider(p.id)?.capabilities,
     }));
   });
 

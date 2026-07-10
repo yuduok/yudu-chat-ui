@@ -113,7 +113,7 @@ export function ChatPage() {
 
   return (
     <div className="flex h-full">
-      <Sidebar onOpenSettings={() => setSettingsOpen(true)} />
+      <Sidebar mode="chat" onOpenSettings={() => setSettingsOpen(true)} />
       <main className="flex min-w-0 flex-1 flex-col">
         {/* Header */}
         <header className="flex items-center justify-between gap-2 border-b bg-background/80 px-4 py-2 backdrop-blur sm:px-6">
