@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { apiAssetUrl, getImageCapabilities } from "@/lib/api";
+import { apiAssetUrl, getImageCapabilities, getSettings } from "@/lib/api";
 import { useImageGeneration } from "@/store/image-generation";
 import { useI18n } from "@/i18n";
 
@@ -30,6 +30,7 @@ export function ImageGenerationPage() {
   const { t } = useI18n();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [capabilities, setCapabilities] = useState<CapabilityEntry[]>([]);
+  const [configuredModels, setConfiguredModels] = useState<Record<string, string>>({});
   const [provider, setProvider] = useState("mock");
   const capability = capabilities.find((entry) => entry.provider === provider)?.capabilities;
   const [model, setModel] = useState("mock-image-1");
@@ -46,14 +47,21 @@ export function ImageGenerationPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const { items, generating, error, load, generate, remove, cancel } = useImageGeneration();
 
+  async function refreshImageSettings() {
+    const settings = await getSettings();
+    setConfiguredModels(Object.fromEntries(Object.entries(settings.imageProviders).flatMap(([id, value]) => value.model ? [[id, value.model]] : [])));
+  }
+
   useEffect(() => {
-    void getImageCapabilities().then((entries) => {
+    void Promise.all([getImageCapabilities(), getSettings()]).then(([entries, settings]) => {
       setCapabilities(entries);
+      setConfiguredModels(Object.fromEntries(Object.entries(settings.imageProviders).flatMap(([id, value]) => value.model ? [[id, value.model]] : [])));
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") as Partial<ImageGenerationRequest>;
       const selected = entries.find((entry) => entry.provider === saved.provider) ?? entries.find((entry) => entry.provider === "mock") ?? entries[0];
       if (!selected) return;
       setProvider(selected.provider);
-      setModel(selected.capabilities.models.includes(saved.model || "") ? saved.model! : selected.capabilities.models[0]);
+      const configuredModel = settings.imageProviders[selected.provider]?.model;
+      setModel(selected.provider === "custom" ? saved.model || configuredModel || selected.capabilities.models[0] : selected.capabilities.models.includes(saved.model || "") ? saved.model! : configuredModel || selected.capabilities.models[0]);
       setSize(selected.capabilities.sizes.includes(saved.size || "") ? saved.size! : selected.capabilities.sizes[0]);
       setQuality(selected.capabilities.qualities.includes(saved.quality || "") ? saved.quality! : selected.capabilities.qualities[0]);
       setStyle(selected.capabilities.styles.includes(saved.style || "") ? saved.style! : selected.capabilities.styles[0]);
@@ -68,7 +76,7 @@ export function ImageGenerationPage() {
 
   useEffect(() => {
     if (!capability) return;
-    if (!capability.models.includes(model)) setModel(capability.models[0]);
+    if (provider !== "custom" && !capability.models.includes(model)) setModel(capability.models[0]);
     if (!capability.sizes.includes(size)) setSize(capability.sizes[0]);
     if (!capability.qualities.includes(quality)) setQuality(capability.qualities[0]);
     if (!capability.styles.includes(style)) setStyle(capability.styles[0]);
@@ -80,6 +88,11 @@ export function ImageGenerationPage() {
   }, [provider, capability]);
 
   const canGenerate = Boolean(capability && prompt.trim() && !generating);
+  function changeProvider(nextProvider: string) {
+    setProvider(nextProvider);
+    const nextCapability = capabilities.find((entry) => entry.provider === nextProvider)?.capabilities;
+    setModel(configuredModels[nextProvider] || nextCapability?.models[0] || "");
+  }
   const request = useMemo<ImageGenerationRequest | null>(() => capability ? ({
     provider, model, prompt: prompt.trim(), size, quality, style, count, outputFormat, background, moderation, outputCompression,
     referenceImages: references,
@@ -123,7 +136,7 @@ export function ImageGenerationPage() {
           <section className="h-fit space-y-5 rounded-2xl border bg-card p-5 shadow-sm lg:sticky lg:top-20">
             <div className="space-y-2"><Label>{t("images.prompt")}</Label><Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} className="min-h-32" placeholder={t("images.promptPlaceholder")} /></div>
             <div className="grid grid-cols-2 gap-3">
-              <Option label={t("images.provider")} value={provider} values={capabilities.map((entry) => entry.provider)} onChange={setProvider} />
+              <Option label={t("images.provider")} value={provider} values={capabilities.map((entry) => entry.provider)} onChange={changeProvider} />
               {provider === "custom" ? <div className="space-y-2"><Label>{t("images.model")}</Label><Input value={model} onChange={(event) => setModel(event.target.value)} placeholder="gpt-image-2" /></div> : <Option label={t("images.model")} value={model} values={capability?.models ?? []} onChange={setModel} />}
               <Option label={t("images.size")} value={size} values={capability?.sizes ?? []} onChange={setSize} />
               <Option label={t("images.quality")} value={quality} values={capability?.qualities ?? []} onChange={setQuality} />
@@ -154,7 +167,7 @@ export function ImageGenerationPage() {
           </section>
         </div>
       </main>
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} onSaved={refreshImageSettings} />
     </div>
   );
 }

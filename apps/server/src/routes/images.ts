@@ -7,7 +7,7 @@ import type { GeneratedImageAsset, ImageGeneration, ImageGenerationRequest } fro
 import { dataDir, db } from "../db/index.js";
 import { imageGenerations } from "../db/schema.js";
 import { getImageProvider, listImageProviders } from "../providers/images.js";
-import { getProviderSetting } from "./settings.js";
+import { getImageProviderSetting } from "./settings.js";
 
 const imagesDir = path.join(dataDir, "generated-images");
 const MIME_EXTENSIONS: Record<string, string> = {
@@ -75,7 +75,10 @@ export async function imageRoutes(app: FastifyInstance) {
     const validationError = validateRequest(input);
     if (validationError) return reply.badRequest(validationError);
     const provider = getImageProvider(input.provider)!;
-    const setting = getProviderSetting(input.provider);
+    const setting = getImageProviderSetting(input.provider);
+    if (input.provider === "custom" && (!setting.apiKey || !setting.baseUrl)) {
+      return reply.badRequest("custom image provider requires its own API key and base URL");
+    }
     const id = nanoid();
     const createdAt = Date.now();
     const options = {

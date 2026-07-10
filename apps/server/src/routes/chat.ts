@@ -7,6 +7,8 @@ import { getProvider } from "../providers/registry.js";
 import { getProviderSetting } from "./settings.js";
 import { getAgent, listAgents } from "../agents/index.js";
 import { listTools, runTool } from "../tools/index.js";
+import { getEnabledSkillsPrompt } from "../skills/index.js";
+import { getAllSettings } from "./settings.js";
 import type {
   AgentProfile,
   ChatMessage,
@@ -89,6 +91,13 @@ function parseArgs(args: Record<string, unknown> | string): Record<string, unkno
 function serializeArgs(args: Record<string, unknown> | string): string {
   if (typeof args === "string") return args;
   return JSON.stringify(args);
+}
+
+function withSkills(systemPrompt: string | null | undefined): string | undefined {
+  if (!getAllSettings().skills.enabled) return systemPrompt ?? undefined;
+  const skillsPrompt = getEnabledSkillsPrompt();
+  if (!skillsPrompt) return systemPrompt ?? undefined;
+  return [systemPrompt, "Follow these enabled user skills when relevant:", skillsPrompt].filter(Boolean).join("\n\n");
 }
 
 function rowToMessage(row: typeof messages.$inferSelect): ChatMessage {
@@ -481,7 +490,7 @@ export async function chatRoutes(app: FastifyInstance) {
 
     const providerId = agent?.provider ?? conv.provider;
     const model = agent?.model ?? conv.model;
-    const systemPrompt = agent?.systemPrompt ?? conv.systemPrompt ?? undefined;
+    const systemPrompt = withSkills(agent?.systemPrompt ?? conv.systemPrompt ?? undefined);
     const temperature = agent?.temperature ?? conv.temperature ?? 0.7;
     // Reasoning effort: per-turn override > agent > conversation > null.
     const allowedEfforts = ["low", "medium", "high", "xhigh"] as const;
@@ -634,7 +643,7 @@ export async function chatRoutes(app: FastifyInstance) {
           // Per-agent overrides
           const linkProvider = link.agent?.provider ?? providerId;
           const linkModel = link.agent?.model ?? model;
-          const linkSystem = link.agent?.systemPrompt ?? systemPrompt ?? undefined;
+          const linkSystem = link.agent?.systemPrompt ? withSkills(link.agent.systemPrompt) : systemPrompt;
           const linkTemp = link.agent?.temperature ?? temperature;
           // Tools: each agent re-filters via its own allowlist.
           const linkTools = pickTools({

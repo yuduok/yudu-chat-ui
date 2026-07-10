@@ -11,6 +11,7 @@ import type {
   ImageGeneration,
   ImageGenerationCapabilities,
   ImageGenerationRequest,
+  SkillDefinition,
   UsageReport,
 } from "@yudu/shared";
 
@@ -221,7 +222,9 @@ export async function getProviderModels(
 
 export interface Settings {
   providers: Record<string, { apiKeyMasked?: string; baseUrl?: string; manualModels: string[] }>;
+  imageProviders: Record<string, { apiKeyMasked?: string; baseUrl?: string; model?: string }>;
   ui: { theme: "light" | "dark" | "system" };
+  skills: { enabled: boolean };
 }
 
 export async function getSettings(): Promise<Settings> {
@@ -232,7 +235,9 @@ export async function getSettings(): Promise<Settings> {
 
 export async function saveSettings(input: {
   providers: Record<string, { apiKey?: string | null; baseUrl?: string | null; manualModels?: string[] }>;
+  imageProviders?: Record<string, { apiKey?: string | null; baseUrl?: string | null; model?: string | null }>;
   ui?: { theme?: "light" | "dark" | "system" };
+  skills?: { enabled?: boolean };
 }): Promise<Settings> {
   const r = await fetch(`${BASE}/settings`, {
     method: "PUT",
@@ -241,6 +246,29 @@ export async function saveSettings(input: {
   });
   if (!r.ok) throw new Error("saveSettings failed");
   return r.json();
+}
+
+export async function listSkills(): Promise<SkillDefinition[]> {
+  const r = await fetch(`${BASE}/skills`);
+  if (!r.ok) throw new Error("listSkills failed");
+  return r.json();
+}
+
+export async function importSkill(input: { name: string; description?: string; content: string }): Promise<SkillDefinition> {
+  const r = await fetch(`${BASE}/skills`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+  if (!r.ok) throw new Error((await r.text().catch(() => "")) || "importSkill failed");
+  return r.json();
+}
+
+export async function setSkillEnabled(id: string, enabled: boolean): Promise<SkillDefinition> {
+  const r = await fetch(`${BASE}/skills/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }) });
+  if (!r.ok) throw new Error("setSkillEnabled failed");
+  return r.json();
+}
+
+export async function deleteSkill(id: string): Promise<void> {
+  const r = await fetch(`${BASE}/skills/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!r.ok) throw new Error("deleteSkill failed");
 }
 
 // Aggregate token usage across every persisted conversation. Token counts

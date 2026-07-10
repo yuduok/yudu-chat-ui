@@ -10,6 +10,7 @@ import { agentRoutes } from "./routes/agents.js";
 import { usageRoutes } from "./routes/usage.js";
 import { uploadRoutes } from "./routes/uploads.js";
 import { imageRoutes } from "./routes/images.js";
+import { skillRoutes } from "./routes/skills.js";
 import { loadAgents } from "./agents/index.js";
 import { registerBuiltinTools } from "./tools/builtin.js";
 
@@ -21,7 +22,16 @@ export async function start(): Promise<void> {
     },
   });
 
-  await app.register(cors, { origin: true, credentials: true });
+  await app.register(cors, {
+    credentials: true,
+    origin(origin, callback) {
+      if (!origin || /^(https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?|https?:\/\/tauri\.localhost|tauri:\/\/localhost)$/.test(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error("Origin not allowed"), false);
+    },
+  });
   await app.register(sensible);
   await app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -39,6 +49,7 @@ export async function start(): Promise<void> {
   await app.register(usageRoutes);
   await app.register(uploadRoutes);
   await app.register(imageRoutes);
+  await app.register(skillRoutes);
 
   const port = Number(process.env.PORT ?? 8787);
   const host = process.env.HOST ?? "0.0.0.0";

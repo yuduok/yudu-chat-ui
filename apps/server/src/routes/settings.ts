@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import fs from "node:fs";
 import path from "node:path";
-import { dataDir } from "../db/index.js";
+import { dataDir } from "../data-dir.js";
 
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 const settingsPath = path.join(dataDir, "settings.json");
@@ -12,14 +12,24 @@ export interface ProviderSetting {
   manualModels?: string[];
 }
 
+export interface ImageProviderSetting {
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+}
+
 export interface AppSettings {
   providers: Record<string, ProviderSetting>;
+  imageProviders: Record<string, ImageProviderSetting>;
   ui: { theme: "light" | "dark" | "system" };
+  skills: { enabled: boolean };
 }
 
 const defaults: AppSettings = {
   providers: {},
+  imageProviders: {},
   ui: { theme: "system" },
+  skills: { enabled: false },
 };
 
 function readSettings(): AppSettings {
@@ -28,7 +38,9 @@ function readSettings(): AppSettings {
     const parsed = JSON.parse(raw);
     return {
       providers: parsed.providers ?? {},
+      imageProviders: parsed.imageProviders ?? {},
       ui: parsed.ui ?? defaults.ui,
+      skills: parsed.skills ?? defaults.skills,
     };
   } catch {
     return defaults;
@@ -50,6 +62,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   app.get("/api/settings", async () => {
     const s = readSettings();
     const masked: Record<string, { apiKeyMasked?: string; baseUrl?: string; manualModels: string[] }> = {};
+    const maskedImages: Record<string, { apiKeyMasked?: string; baseUrl?: string; model?: string }> = {};
     for (const [k, v] of Object.entries(s.providers)) {
       masked[k] = {
         apiKeyMasked: maskKey(v.apiKey),
@@ -57,14 +70,19 @@ export async function settingsRoutes(app: FastifyInstance) {
         manualModels: v.manualModels ?? [],
       };
     }
-    return { providers: masked, ui: s.ui };
+    for (const [k, v] of Object.entries(s.imageProviders)) {
+      maskedImages[k] = { apiKeyMasked: maskKey(v.apiKey), baseUrl: v.baseUrl, model: v.model };
+    }
+    return { providers: masked, imageProviders: maskedImages, ui: s.ui, skills: s.skills };
   });
 
   // PUT: partial merge; masked placeholders for apiKey keep the existing secret
   app.put<{
     Body: {
       providers?: Record<string, { apiKey?: string; baseUrl?: string; manualModels?: string[] }>;
+      imageProviders?: Record<string, { apiKey?: string; baseUrl?: string; model?: string }>;
       ui?: { theme?: "light" | "dark" | "system" };
+      skills?: { enabled?: boolean };
     };
   }>("/api/settings", async (req) => {
     const incoming = req.body ?? {};
@@ -90,9 +108,19 @@ export async function settingsRoutes(app: FastifyInstance) {
       }
       merged[k] = next;
     }
+    const mergedImages: Record<string, ImageProviderSetting> = { ...current.imageProviders };
+    for (const [k, v] of Object.entries(incoming.imageProviders ?? {})) {
+      const next: ImageProviderSetting = { ...(mergedImages[k] ?? {}) };
+      if (typeof v.baseUrl === "string") next.baseUrl = v.baseUrl.trim();
+      if (typeof v.model === "string") next.model = v.model.trim();
+      if (typeof v.apiKey === "string" && !v.apiKey.includes("...") && v.apiKey !== "****") next.apiKey = v.apiKey;
+      mergedImages[k] = next;
+    }
     const next: AppSettings = {
       providers: merged,
+      imageProviders: mergedImages,
       ui: incoming.ui?.theme ? { ...current.ui, theme: incoming.ui.theme } : current.ui,
+      skills: typeof incoming.skills?.enabled === "boolean" ? { enabled: incoming.skills.enabled } : current.skills,
     };
     writeSettings(next);
     return { ok: true };
@@ -106,4 +134,16 @@ export function getProviderSetting(id: string): ProviderSetting {
 
 export function getAllSettings(): AppSettings {
   return readSettings();
+}
+
+export function getImageProviderSetting(id: string): ImageProviderSetting {
+  const settings = readSettings();
+  const image = settings.imageProviders[id] ?? {};
+  if (id !== "openai") return image;
+  const chat = settings.providers.openai ?? {};
+  return {
+    apiKey: image.apiKey || chat.apiKey,
+    baseUrl: image.baseUrl || chat.baseUrl,
+    model: image.model,
+  };
 }
