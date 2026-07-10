@@ -132,7 +132,7 @@ export function ImageGenerationPage() {
               <Option label={t("images.background")} value={background} values={capability?.backgrounds ?? []} onChange={setBackground} />
               <Option label={t("images.moderation")} value={moderation} values={capability?.moderations ?? []} onChange={setModeration} />
               <div className="space-y-2"><Label>{t("images.count")}</Label><Input type="number" min={1} max={capability?.maxImages ?? 1} value={count} onChange={(event) => setCount(Math.max(1, Math.min(Number(event.target.value), capability?.maxImages ?? 1)))} /></div>
-              {capability?.supportsOutputCompression && <div className="space-y-2"><Label>{t("images.compression")}</Label><Input type="number" min={0} max={100} value={outputCompression} onChange={(event) => setOutputCompression(Math.max(0, Math.min(100, Number(event.target.value))))} /></div>}
+              {capability?.supportsOutputCompression && outputFormat !== "png" && <div className="space-y-2"><Label>{t("images.compression")}</Label><Input type="number" min={0} max={100} value={outputCompression} onChange={(event) => setOutputCompression(Math.max(0, Math.min(100, Number(event.target.value))))} /></div>}
             </div>
             {capability?.supportsReferenceImages && (
               <div className="space-y-2">

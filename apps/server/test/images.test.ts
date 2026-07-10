@@ -51,6 +51,24 @@ test("OpenAI image provider preserves requested base64 output MIME", async () =>
   }
 });
 
+test("OpenAI image provider only sends compression for JPEG or WebP", async () => {
+  const previousFetch = globalThis.fetch;
+  const bodies: any[] = [];
+  globalThis.fetch = async (_url, init) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from("image").toString("base64") }] }), { status: 200 });
+  };
+  try {
+    const provider = new OpenAIImageProvider("openai");
+    await provider.generate({ ...baseRequest, outputFormat: "png", outputCompression: 70 }, { apiKey: "test" });
+    await provider.generate({ ...baseRequest, outputFormat: "jpeg", outputCompression: 70 }, { apiKey: "test" });
+    assert.equal(bodies[0].output_compression, undefined);
+    assert.equal(bodies[1].output_compression, 70);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test("OpenAI image provider uses edits endpoint for references", async () => {
   const previousFetch = globalThis.fetch;
   let requestedUrl = "";
