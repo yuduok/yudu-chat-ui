@@ -11,6 +11,8 @@ import * as api from "@/lib/api";
 import { useTheme } from "@/hooks/use-theme";
 import { useI18n, type Locale } from "@/i18n";
 import type { ProviderConfig } from "@yudu/shared";
+import type { SkillDefinition } from "@yudu/shared";
+import { SkillsSettings } from "@/components/skills-settings";
 import { toast } from "sonner";
 import { Check, Eye, EyeOff, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 
@@ -22,11 +24,14 @@ interface FetchedModels {
   error?: string;
 }
 
-export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+export function SettingsDialog({ open, onOpenChange, onSaved }: { open: boolean; onOpenChange: (v: boolean) => void; onSaved?: () => void | Promise<void> }) {
   const { t, locale, setLocale } = useI18n();
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [draft, setDraft] = useState<Record<string, { apiKey: string; baseUrl: string; show: boolean; manualModels: string[] }>>({});
   const [active, setActive] = useState<string>("");
+  const [imageDraft, setImageDraft] = useState<Record<string, { apiKey: string; baseUrl: string; model: string; show: boolean }>>({});
+  const [skillsEnabled, setSkillsEnabled] = useState(false);
+  const [skills, setSkills] = useState<SkillDefinition[]>([]);
   const [manualInput, setManualInput] = useState("");
   const [fetching, setFetching] = useState(false);
   const [fetched, setFetched] = useState<Record<string, FetchedModels>>({});
@@ -37,7 +42,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   useEffect(() => {
     if (!open) return;
     (async () => {
-      const [ps, st] = await Promise.all([api.listProviders(), api.getSettings()]);
+      const [ps, st, installedSkills] = await Promise.all([api.listProviders(), api.getSettings(), api.listSkills()]);
       setProviders(ps);
       const init: typeof draft = {};
       for (const p of ps) {
@@ -50,6 +55,14 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         };
       }
       setDraft(init);
+      setImageDraft(Object.fromEntries(["openai", "custom"].map((id) => [id, {
+        apiKey: st.imageProviders[id]?.apiKeyMasked ?? "",
+        baseUrl: st.imageProviders[id]?.baseUrl ?? "",
+        model: st.imageProviders[id]?.model ?? (id === "custom" ? "gpt-image-2" : ""),
+        show: false,
+      }])));
+      setSkillsEnabled(st.skills.enabled);
+      setSkills(installedSkills);
       if (ps[0]) setActive(ps[0].id);
       setFetched({});
       setPicked({});
@@ -129,8 +142,11 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           { apiKey: v.apiKey, baseUrl: v.baseUrl, manualModels: v.manualModels },
         ]),
       ),
+      imageProviders: Object.fromEntries(Object.entries(imageDraft).map(([id, value]) => [id, { apiKey: value.apiKey, baseUrl: value.baseUrl, model: value.model }])),
+      skills: { enabled: skillsEnabled },
     };
     await api.saveSettings(payload);
+    await onSaved?.();
     toast.success(t("settings.saved"));
     onOpenChange(false);
   }
@@ -151,6 +167,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         <Tabs defaultValue="providers">
           <TabsList>
             <TabsTrigger value="providers">{t("settings.tab.providers")}</TabsTrigger>
+            <TabsTrigger value="images">{t("settings.tab.imageProviders")}</TabsTrigger>
+            <TabsTrigger value="skills">{t("settings.tab.skills")}</TabsTrigger>
             <TabsTrigger value="appearance">{t("settings.tab.appearance")}</TabsTrigger>
           </TabsList>
 
@@ -327,6 +345,21 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               </div>
             )}
           </TabsContent>
+
+          <TabsContent value="images" className="space-y-3">
+            {(["openai", "custom"] as const).map((id) => {
+              const value = imageDraft[id];
+              if (!value) return null;
+              return <div key={id} className="space-y-3 rounded-md border p-4">
+                <div><Label>{id === "openai" ? "OpenAI" : "Custom"}</Label><p className="text-[11px] text-muted-foreground">{t(id === "openai" ? "settings.imageProviders.openaiHint" : "settings.imageProviders.customHint")}</p></div>
+                <div className="space-y-1.5"><Label>{t("settings.apiKey")}</Label><div className="relative"><Input type={value.show ? "text" : "password"} value={value.apiKey} onChange={(event) => setImageDraft((draft) => ({ ...draft, [id]: { ...draft[id], apiKey: event.target.value } }))} /><button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" onClick={() => setImageDraft((draft) => ({ ...draft, [id]: { ...draft[id], show: !draft[id].show } }))}>{value.show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></div>
+                <div className="space-y-1.5"><Label>{t("settings.baseUrl")}</Label><Input value={value.baseUrl} onChange={(event) => setImageDraft((draft) => ({ ...draft, [id]: { ...draft[id], baseUrl: event.target.value } }))} placeholder="https://api.example.com/v1" /></div>
+                <div className="space-y-1.5"><Label>{t("images.model")}</Label><Input value={value.model} onChange={(event) => setImageDraft((draft) => ({ ...draft, [id]: { ...draft[id], model: event.target.value } }))} placeholder="gpt-image-2" /></div>
+              </div>;
+            })}
+          </TabsContent>
+
+          <TabsContent value="skills"><SkillsSettings enabled={skillsEnabled} onEnabledChange={setSkillsEnabled} skills={skills} onSkillsChange={setSkills} /></TabsContent>
 
           <TabsContent value="appearance" className="space-y-3">
             <div className="flex items-center justify-between rounded-md border p-4">

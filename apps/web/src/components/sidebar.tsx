@@ -33,6 +33,11 @@ export function Sidebar({ onOpenSettings, mode = "chat" }: { onOpenSettings: () 
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
 
+  async function openConversation(id: string) {
+    window.location.hash = "/chat";
+    await select(id);
+  }
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0");
@@ -177,7 +182,7 @@ export function Sidebar({ onOpenSettings, mode = "chat" }: { onOpenSettings: () 
                 <TooltipTrigger asChild>
                   <button
                     className="flex h-7 w-7 items-center justify-center rounded text-xs font-semibold"
-                    onClick={() => void select(c.id)}
+                    onClick={() => void openConversation(c.id)}
                     aria-label={c.title}
                   >
                     {c.title.trim().charAt(0).toUpperCase() || "·"}
@@ -186,7 +191,7 @@ export function Sidebar({ onOpenSettings, mode = "chat" }: { onOpenSettings: () 
                 <TooltipContent side="right">{c.title}</TooltipContent>
               </Tooltip>
             ) : (
-              <button className="flex-1 truncate text-left" onClick={() => void select(c.id)}>
+              <button className="flex-1 truncate text-left" onClick={() => void openConversation(c.id)}>
                 {c.title}
               </button>
             )}

@@ -193,6 +193,15 @@ export interface AgentProfile {
   handoff?: "context" | "none";
 }
 
+export interface SkillDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  content: string;
+  enabled: boolean;
+  createdAt: number;
+}
+
 // Provider-facing normalized message shape (consumed by chat providers).
 // `toolCalls` mirrors what we send upstream; tools go back via the
 // ProviderMessageContentPart union.
