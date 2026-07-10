@@ -38,12 +38,14 @@ function validateRequest(input: ImageGenerationRequest): string | null {
   if (!provider) return "provider does not support image generation";
   const c = provider.capabilities;
   if (!input.prompt?.trim()) return "prompt is required";
-  if (!c.models.includes(input.model)) return "unsupported image model";
+  if (!input.model?.trim() || (input.provider !== "custom" && !c.models.includes(input.model))) return "unsupported image model";
   if (!c.sizes.includes(input.size)) return "unsupported image size";
   if (!c.qualities.includes(input.quality)) return "unsupported image quality";
   if (input.style && !c.styles.includes(input.style)) return "unsupported image style";
   if (!c.outputFormats.includes(input.outputFormat)) return "unsupported output format";
   if (input.background && !c.backgrounds.includes(input.background)) return "unsupported background";
+  if (input.moderation && !c.moderations.includes(input.moderation)) return "unsupported moderation level";
+  if (input.outputCompression !== undefined && (!c.supportsOutputCompression || !Number.isInteger(input.outputCompression) || input.outputCompression < 0 || input.outputCompression > 100)) return "output compression must be between 0 and 100";
   if (!Number.isInteger(input.count) || input.count < 1 || input.count > c.maxImages) return `count must be between 1 and ${c.maxImages}`;
   if ((input.referenceImages?.length ?? 0) > c.maxReferenceImages) return `too many reference images (max ${c.maxReferenceImages})`;
   if (input.referenceImages?.length && !c.supportsReferenceImages) return "reference images are not supported";
@@ -83,6 +85,8 @@ export async function imageRoutes(app: FastifyInstance) {
       count: input.count,
       outputFormat: input.outputFormat,
       background: input.background,
+      moderation: input.moderation,
+      outputCompression: input.outputCompression,
     };
     const controller = new AbortController();
     const abort = () => controller.abort();

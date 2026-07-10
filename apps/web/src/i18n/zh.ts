@@ -143,6 +143,8 @@ export const zh: Record<TranslationKey, string> = {
   "images.style": "风格",
   "images.format": "格式",
   "images.background": "背景",
+  "images.moderation": "内容审核",
+  "images.compression": "压缩质量（0–100）",
   "images.count": "数量",
   "images.references": "参考图",
   "images.addReferences": "拖放或选择参考图片",

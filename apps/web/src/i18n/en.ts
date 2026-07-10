@@ -143,6 +143,8 @@ export const en = {
   "images.style": "Style",
   "images.format": "Format",
   "images.background": "Background",
+  "images.moderation": "Moderation",
+  "images.compression": "Compression (0–100)",
   "images.count": "Images",
   "images.references": "Reference images",
   "images.addReferences": "Drop or select reference images",

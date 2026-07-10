@@ -122,6 +122,8 @@ export interface ImageGenerationCapabilities {
   styles: string[];
   outputFormats: string[];
   backgrounds: string[];
+  moderations: string[];
+  supportsOutputCompression: boolean;
   maxImages: number;
   maxReferenceImages: number;
   supportsReferenceImages: boolean;
@@ -137,6 +139,8 @@ export interface ImageGenerationRequest {
   count: number;
   outputFormat: string;
   background?: string;
+  moderation?: string;
+  outputCompression?: number;
   referenceImages?: Array<{ name: string; dataUrl: string }>;
 }
 

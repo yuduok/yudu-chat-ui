@@ -40,6 +40,8 @@ export function ImageGenerationPage() {
   const [count, setCount] = useState(1);
   const [outputFormat, setOutputFormat] = useState("png");
   const [background, setBackground] = useState("auto");
+  const [moderation, setModeration] = useState("auto");
+  const [outputCompression, setOutputCompression] = useState(100);
   const [references, setReferences] = useState<ReferenceImage[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const { items, generating, error, load, generate, remove, cancel } = useImageGeneration();
@@ -57,6 +59,8 @@ export function ImageGenerationPage() {
       setStyle(selected.capabilities.styles.includes(saved.style || "") ? saved.style! : selected.capabilities.styles[0]);
       setOutputFormat(selected.capabilities.outputFormats.includes(saved.outputFormat || "") ? saved.outputFormat! : selected.capabilities.outputFormats[0]);
       setBackground(selected.capabilities.backgrounds.includes(saved.background || "") ? saved.background! : selected.capabilities.backgrounds[0]);
+      setModeration(selected.capabilities.moderations.includes(saved.moderation || "") ? saved.moderation! : selected.capabilities.moderations[0]);
+      setOutputCompression(saved.outputCompression ?? 100);
       setCount(Math.min(saved.count || 1, selected.capabilities.maxImages));
     });
     void load();
@@ -70,15 +74,16 @@ export function ImageGenerationPage() {
     if (!capability.styles.includes(style)) setStyle(capability.styles[0]);
     if (!capability.outputFormats.includes(outputFormat)) setOutputFormat(capability.outputFormats[0]);
     if (!capability.backgrounds.includes(background)) setBackground(capability.backgrounds[0]);
+    if (!capability.moderations.includes(moderation)) setModeration(capability.moderations[0]);
     setCount((value) => Math.min(value, capability.maxImages));
     if (!capability.supportsReferenceImages) setReferences([]);
   }, [provider, capability]);
 
   const canGenerate = Boolean(capability && prompt.trim() && !generating);
   const request = useMemo<ImageGenerationRequest | null>(() => capability ? ({
-    provider, model, prompt: prompt.trim(), size, quality, style, count, outputFormat, background,
+    provider, model, prompt: prompt.trim(), size, quality, style, count, outputFormat, background, moderation, outputCompression,
     referenceImages: references,
-  }) : null, [provider, model, prompt, size, quality, style, count, outputFormat, background, references, capability]);
+  }) : null, [provider, model, prompt, size, quality, style, count, outputFormat, background, moderation, outputCompression, references, capability]);
 
   async function addReferences(files: FileList | null) {
     if (!files || !capability) return;
@@ -101,6 +106,7 @@ export function ImageGenerationPage() {
     setProvider(item.provider); setModel(item.model); setPrompt(item.prompt);
     setSize(item.options.size); setQuality(item.options.quality); setStyle(item.options.style || "auto");
     setCount(item.options.count); setOutputFormat(item.options.outputFormat); setBackground(item.options.background || "auto");
+    setModeration(item.options.moderation || "auto"); setOutputCompression(item.options.outputCompression ?? 100);
     setReferences(item.referenceImages);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -118,13 +124,15 @@ export function ImageGenerationPage() {
             <div className="space-y-2"><Label>{t("images.prompt")}</Label><Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} className="min-h-32" placeholder={t("images.promptPlaceholder")} /></div>
             <div className="grid grid-cols-2 gap-3">
               <Option label={t("images.provider")} value={provider} values={capabilities.map((entry) => entry.provider)} onChange={setProvider} />
-              <Option label={t("images.model")} value={model} values={capability?.models ?? []} onChange={setModel} />
+              {provider === "custom" ? <div className="space-y-2"><Label>{t("images.model")}</Label><Input value={model} onChange={(event) => setModel(event.target.value)} placeholder="gpt-image-2" /></div> : <Option label={t("images.model")} value={model} values={capability?.models ?? []} onChange={setModel} />}
               <Option label={t("images.size")} value={size} values={capability?.sizes ?? []} onChange={setSize} />
               <Option label={t("images.quality")} value={quality} values={capability?.qualities ?? []} onChange={setQuality} />
               {capability && capability.styles.length > 0 && <Option label={t("images.style")} value={style} values={capability.styles} onChange={setStyle} />}
               <Option label={t("images.format")} value={outputFormat} values={capability?.outputFormats ?? []} onChange={setOutputFormat} />
               <Option label={t("images.background")} value={background} values={capability?.backgrounds ?? []} onChange={setBackground} />
+              <Option label={t("images.moderation")} value={moderation} values={capability?.moderations ?? []} onChange={setModeration} />
               <div className="space-y-2"><Label>{t("images.count")}</Label><Input type="number" min={1} max={capability?.maxImages ?? 1} value={count} onChange={(event) => setCount(Math.max(1, Math.min(Number(event.target.value), capability?.maxImages ?? 1)))} /></div>
+              {capability?.supportsOutputCompression && <div className="space-y-2"><Label>{t("images.compression")}</Label><Input type="number" min={0} max={100} value={outputCompression} onChange={(event) => setOutputCompression(Math.max(0, Math.min(100, Number(event.target.value))))} /></div>}
             </div>
             {capability?.supportsReferenceImages && (
               <div className="space-y-2">

@@ -11,12 +11,14 @@ export interface ImageProvider {
 }
 
 export const openAIImageCapabilities: ImageGenerationCapabilities = {
-  models: ["gpt-image-1"],
+  models: ["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"],
   sizes: ["auto", "1024x1024", "1536x1024", "1024x1536"],
   qualities: ["auto", "low", "medium", "high", "standard", "hd"],
-  styles: ["auto", "natural", "vivid"],
+  styles: [],
   outputFormats: ["png", "jpeg", "webp"],
   backgrounds: ["auto", "transparent", "opaque"],
+  moderations: ["auto", "low"],
+  supportsOutputCompression: true,
   maxImages: 4,
   maxReferenceImages: 4,
   supportsReferenceImages: true,
@@ -70,6 +72,8 @@ export class OpenAIImageProvider implements ImageProvider {
       if (input.quality !== "auto") form.append("quality", input.quality);
       if (input.outputFormat) form.append("output_format", input.outputFormat);
       if (input.background && input.background !== "auto") form.append("background", input.background);
+      if (input.moderation && input.moderation !== "auto") form.append("moderation", input.moderation);
+      if (input.outputCompression !== undefined) form.append("output_compression", String(input.outputCompression));
       references.forEach((reference) => {
         const parsed = parseDataUrl(reference.dataUrl);
         form.append("image[]", new Blob([Uint8Array.from(parsed.bytes)], { type: parsed.mimeType }), reference.name);
@@ -92,6 +96,8 @@ export class OpenAIImageProvider implements ImageProvider {
     if (input.style && input.style !== "auto") body.style = input.style;
     if (input.outputFormat) body.output_format = input.outputFormat;
     if (input.background && input.background !== "auto") body.background = input.background;
+    if (input.moderation && input.moderation !== "auto") body.moderation = input.moderation;
+    if (input.outputCompression !== undefined) body.output_compression = input.outputCompression;
     return responseImages(await fetch(`${baseUrl}/images/generations`, {
       method: "POST",
       headers: { authorization: `Bearer ${config.apiKey}`, "content-type": "application/json" },
@@ -106,6 +112,7 @@ export class MockImageProvider implements ImageProvider {
   capabilities: ImageGenerationCapabilities = {
     ...openAIImageCapabilities,
     models: ["mock-image-1"],
+    styles: ["auto", "natural", "vivid"],
   };
   async generate(input: ImageGenerationRequest): Promise<ImageProviderOutput> {
     const color = input.referenceImages?.length ? "7c3aed" : "2563eb";

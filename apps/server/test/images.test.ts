@@ -4,7 +4,7 @@ import { MockImageProvider, OpenAIImageProvider } from "../src/providers/images.
 
 const baseRequest = {
   provider: "openai",
-  model: "gpt-image-1",
+  model: "gpt-image-2",
   prompt: "a blue fox",
   size: "1024x1024",
   quality: "high",
@@ -30,7 +30,7 @@ test("OpenAI image provider sends generation options", async () => {
   };
   try {
     const output = await new OpenAIImageProvider("openai").generate(baseRequest, { apiKey: "test" });
-    assert.equal(requestBody.model, "gpt-image-1");
+    assert.equal(requestBody.model, "gpt-image-2");
     assert.equal(requestBody.size, "1024x1024");
     assert.equal(requestBody.quality, "high");
     assert.equal(requestBody.output_format, "png");
