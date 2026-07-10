@@ -86,6 +86,11 @@ new providers by registering a `ChatProvider` in
   message, and runs a follow-up round so the model can react. The UI surfaces
   inline tool chips above the assistant message, a compact result strip for
   each `role: "tool"` message, and a live Activity drawer on the side.
+- **Multimodal attachments** — the composer accepts up to six images or
+  documents per message. PNG/JPEG/GIF/WebP images are sent as provider-native
+  vision parts; PDF, DOCX, Markdown, text, CSV, JSON, HTML, and XML files are
+  extracted server-side and forwarded as named document context. Attachments
+  remain in message history and conversation exports.
 - **Multi-agent orchestration** — agent profiles live in
   `apps/server/src/agents/*.json` and are loaded on boot. Each profile
   overrides `systemPrompt`, `temperature`, `model`, `provider`, and a `tools`

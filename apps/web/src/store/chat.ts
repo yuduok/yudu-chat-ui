@@ -113,6 +113,7 @@ interface ChatState {
       useTools?: boolean;
       reasoningEffort?: "low" | "medium" | "high" | "xhigh";
       showThinking?: boolean;
+      parts?: ChatMessage["parts"];
     },
   ) => Promise<void>;
   stop: () => void;
@@ -410,6 +411,7 @@ export const useChat = create<ChatState>((set, get) => ({
           conversationId: activeId,
           role: "user",
           content,
+          parts: opts?.parts ?? null,
           createdAt: Date.now(),
         },
       ];
@@ -421,6 +423,7 @@ export const useChat = create<ChatState>((set, get) => ({
           conversationId: activeId,
           role: "user",
           content,
+          parts: opts?.parts ?? null,
           createdAt: Date.now(),
         },
       ];
@@ -448,6 +451,7 @@ export const useChat = create<ChatState>((set, get) => ({
         {
           conversationId: activeId,
           content,
+          parts: opts?.parts ?? undefined,
           regenerate: opts?.regenerate,
           editLastUser: opts?.editLastUser,
           useTools: opts?.useTools,

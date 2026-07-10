@@ -7,6 +7,7 @@ import type {
   ProviderConfig,
   StreamEvent,
   ChatRequest,
+  ContentPart,
   UsageReport,
 } from "@yudu/shared";
 
@@ -147,6 +148,15 @@ export async function listAgents(): Promise<AgentProfile[]> {
   const r = await fetch(`${BASE}/agents`);
   if (!r.ok) throw new Error("listAgents failed");
   return r.json();
+}
+
+export async function uploadAttachment(file: File): Promise<ContentPart> {
+  const form = new FormData();
+  form.append("file", file);
+  const r = await fetch(`${BASE}/uploads`, { method: "POST", body: form });
+  if (!r.ok) throw new Error((await r.text().catch(() => "")) || "upload failed");
+  const payload = await r.json() as { attachment: ContentPart };
+  return payload.attachment;
 }
 
 export interface ProviderModels {

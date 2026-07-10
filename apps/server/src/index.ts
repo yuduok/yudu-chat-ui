@@ -8,11 +8,13 @@ import { providerRoutes } from "./routes/providers.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { agentRoutes } from "./routes/agents.js";
 import { usageRoutes } from "./routes/usage.js";
+import { uploadRoutes } from "./routes/uploads.js";
 import { loadAgents } from "./agents/index.js";
 import { registerBuiltinTools } from "./tools/builtin.js";
 
 export async function start(): Promise<void> {
   const app = Fastify({
+    bodyLimit: 64 * 1024 * 1024,
     logger: {
       level: process.env.LOG_LEVEL ?? "info",
     },
@@ -34,6 +36,7 @@ export async function start(): Promise<void> {
   await app.register(settingsRoutes);
   await app.register(agentRoutes);
   await app.register(usageRoutes);
+  await app.register(uploadRoutes);
 
   const port = Number(process.env.PORT ?? 8787);
   const host = process.env.HOST ?? "0.0.0.0";

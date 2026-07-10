@@ -45,7 +45,8 @@ export interface ToolResultPart {
 // provider streams them as part of the assistant turn.
 export type ContentPart =
   | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string } }
+  | { type: "image_url"; image_url: { url: string }; name?: string; mimeType?: string; size?: number }
+  | { type: "document"; name: string; mimeType: string; size: number; text: string }
   | ToolCallPart
   | ToolResultPart
   // Reasoning / thinking trace emitted by the model before (or alongside)
